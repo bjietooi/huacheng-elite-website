@@ -6,7 +6,9 @@ const CONFIG = {
   // WhatsApp number — digits only, including country code (no +, spaces or dashes).
   whatsapp: "6588888888",          // TODO: replace with the real WhatsApp number
   phoneDisplay: "+65 8888 8888",   // TODO: shown on the page
-  email: "hello@huachengelite.com" // TODO: replace with the real email
+  email: "hello@huachengelite.com", // TODO: replace with the real email
+  // Instagram falls back to HC.brand.instagram (mock-data.js) when present.
+  instagram: "https://www.instagram.com/"
 };
 
 const DEFAULT_WA_MSG = "Hi Huacheng Elite! I'd like to find out more and book a free trial class.";
@@ -16,8 +18,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const yr = document.getElementById("year");
   if (yr) yr.textContent = new Date().getFullYear();
 
-  /* ---- Wire up WhatsApp / email / phone from CONFIG ---- */
-  const waBase = `https://wa.me/${CONFIG.whatsapp}`;
+  /* ---- Contact details: prefer the shared HC.brand (mock-data.js), fall
+         back to CONFIG so the marketing site and portal never show different
+         numbers. Update the real values once in mock-data.js. ---- */
+  const HC = window.HC || null;
+  const brand = (HC && HC.brand) || {};
+  const waNumber = brand.whatsapp || CONFIG.whatsapp;
+  const emailAddr = brand.email || CONFIG.email;
+  const phoneText = brand.phoneDisplay || CONFIG.phoneDisplay;
+  const instagramUrl = brand.instagram || CONFIG.instagram;
+
+  const waBase = `https://wa.me/${waNumber}`;
   document.querySelectorAll("[data-wa]").forEach((el) => {
     const msg = el.getAttribute("data-wa-msg") || DEFAULT_WA_MSG;
     el.setAttribute("href", `${waBase}?text=${encodeURIComponent(msg)}`);
@@ -25,11 +36,16 @@ document.addEventListener("DOMContentLoaded", () => {
     el.setAttribute("rel", "noopener");
   });
   document.querySelectorAll("[data-email]").forEach((el) => {
-    el.setAttribute("href", `mailto:${CONFIG.email}`);
-    if (!el.textContent.trim() || el.hasAttribute("data-email-text")) el.textContent = CONFIG.email;
+    el.setAttribute("href", `mailto:${emailAddr}`);
+    if (!el.textContent.trim() || el.hasAttribute("data-email-text")) el.textContent = emailAddr;
   });
   document.querySelectorAll("[data-phone-display]").forEach((el) => {
-    el.textContent = CONFIG.phoneDisplay;
+    el.textContent = phoneText;
+  });
+  document.querySelectorAll("[data-instagram]").forEach((el) => {
+    el.setAttribute("href", instagramUrl);
+    el.setAttribute("target", "_blank");
+    el.setAttribute("rel", "noopener");
   });
 
   /* ---- Announcement dismiss ---- */
@@ -43,33 +59,35 @@ document.addEventListener("DOMContentLoaded", () => {
   onScroll();
   window.addEventListener("scroll", onScroll, { passive: true });
 
-  /* ---- Mobile nav ---- */
+  /* ---- Mobile nav (only on pages that have the toggle + menu) ---- */
   const toggle = document.getElementById("navToggle");
   const links = document.getElementById("navLinks");
-  const scrim = document.createElement("div");
-  scrim.className = "nav-scrim";
-  document.body.appendChild(scrim);
+  if (toggle && links) {
+    const scrim = document.createElement("div");
+    scrim.className = "nav-scrim";
+    document.body.appendChild(scrim);
 
-  const closeMenu = () => {
-    links.classList.remove("is-open");
-    scrim.classList.remove("is-open");
-    document.body.classList.remove("nav-open");
-    toggle.setAttribute("aria-expanded", "false");
-    toggle.setAttribute("aria-label", "Open menu");
-  };
-  const openMenu = () => {
-    links.classList.add("is-open");
-    scrim.classList.add("is-open");
-    document.body.classList.add("nav-open");
-    toggle.setAttribute("aria-expanded", "true");
-    toggle.setAttribute("aria-label", "Close menu");
-  };
-  toggle.addEventListener("click", () =>
-    links.classList.contains("is-open") ? closeMenu() : openMenu()
-  );
-  scrim.addEventListener("click", closeMenu);
-  links.querySelectorAll("a").forEach((a) => a.addEventListener("click", closeMenu));
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+    const closeMenu = () => {
+      links.classList.remove("is-open");
+      scrim.classList.remove("is-open");
+      document.body.classList.remove("nav-open");
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.setAttribute("aria-label", "Open menu");
+    };
+    const openMenu = () => {
+      links.classList.add("is-open");
+      scrim.classList.add("is-open");
+      document.body.classList.add("nav-open");
+      toggle.setAttribute("aria-expanded", "true");
+      toggle.setAttribute("aria-label", "Close menu");
+    };
+    toggle.addEventListener("click", () =>
+      links.classList.contains("is-open") ? closeMenu() : openMenu()
+    );
+    scrim.addEventListener("click", closeMenu);
+    links.querySelectorAll("a").forEach((a) => a.addEventListener("click", closeMenu));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+  }
 
   /* ---- Scroll reveal ---- */
   const reveals = document.querySelectorAll(".reveal");
@@ -120,7 +138,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
   const animateCount = (el) => {
     const m = el.textContent.trim().match(/^(\d+)(\D*)$/);
-    if (!m) return; // leave non-numeric values (e.g. "Asian", "IWUF")
+    if (!m) return; // leave non-numeric values (e.g. "Chang Quan", "10am–10pm")
     const target = parseInt(m[1], 10);
     const suffix = m[2];
     const dur = 1300;
@@ -149,31 +167,70 @@ document.addEventListener("DOMContentLoaded", () => {
     so.observe(statsList);
   }
 
-  /* ---- Background videos (autoplay can be blocked, so nudge them) ---- */
-  const autoVideos = Array.from(document.querySelectorAll("video[data-autoplay]"));
-  if (autoVideos.length) {
-    const playVideo = (v) => {
-      const rate = parseFloat(v.dataset.rate);
-      if (rate) v.playbackRate = rate; // re-apply: rate can reset on (re)load
-      const p = v.play();
-      if (p && p.catch) p.catch(() => {});
-    };
-    autoVideos.forEach((v) => {
-      v.muted = true; // required for programmatic play on most browsers
-      const rate = parseFloat(v.dataset.rate);
-      if (rate) v.defaultPlaybackRate = rate;
-      playVideo(v);
-      if ("IntersectionObserver" in window) {
-        new IntersectionObserver(
-          (entries) => entries.forEach((e) => (e.isIntersecting ? playVideo(v) : v.pause())),
-          { threshold: 0.05 }
-        ).observe(v);
-      }
-    });
-    const kick = () => autoVideos.forEach(playVideo);
-    ["pointerdown", "touchstart", "scroll", "keydown"].forEach((ev) =>
-      window.addEventListener(ev, kick, { once: true, passive: true })
-    );
+  /* ---- Weekly schedule calendar (rendered from HC.schedule) ----
+     A 7-day week grid (Mon→Sun) with this week's real dates, so it reads
+     like a live calendar. Read-only preview — booking happens in the portal. */
+  const scheduleCal = document.getElementById("scheduleCal");
+  if (scheduleCal && HC && Array.isArray(HC.schedule)) {
+    const esc = (s) =>
+      String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+    scheduleCal.innerHTML = HC.currentWeek()
+      .map((d) => {
+        const entries = HC.scheduleForDay(d.day);
+        const events = entries.length
+          ? entries
+              .map((entry) => {
+                const prog = HC.getProgramme(entry.programmeId);
+                const name = prog ? prog.name : entry.programmeId;
+                const left = HC.spotsLeft(entry);
+                const full = left <= 0;
+                const stateCls = full ? " is-full" : left <= 2 ? " is-low" : "";
+                const spots = full ? "Full" : left + " left";
+                return (
+                  '<div class="cal__event' + stateCls + '" title="' +
+                    esc(name + " · " + HC.formatTime(entry.time) + " · " + entry.coach) + '">' +
+                    '<span class="cal__time">' + HC.formatTime(entry.time) + "</span>" +
+                    '<span class="cal__prog">' + esc(name) + "</span>" +
+                    '<span class="cal__erow">' +
+                      '<span class="cal__coach">' + esc(entry.coach) + "</span>" +
+                      '<span class="cal__spots">' + spots + "</span>" +
+                    "</span>" +
+                  "</div>"
+                );
+              })
+              .join("")
+          : '<p class="cal__none">No classes</p>';
+        return (
+          '<div class="cal__col' + (d.isToday ? " is-today" : "") + '">' +
+            '<div class="cal__head">' +
+              '<span class="cal__dow">' + d.short + "</span>" +
+              '<span class="cal__date">' + d.date + " " + d.month + "</span>" +
+            "</div>" +
+            '<div class="cal__events">' + events + "</div>" +
+          "</div>"
+        );
+      })
+      .join("");
+  }
+
+  /* ---- Sync the enquiry form's programme options with HC.programmes ---- */
+  const progSelect = document.getElementById("f-prog");
+  if (progSelect && HC && Array.isArray(HC.programmes)) {
+    const current = progSelect.value;
+    progSelect.innerHTML =
+      '<option value="Not sure yet">Not sure yet — help me choose</option>' +
+      HC.programmes
+        .map((p) => {
+          const label = p.id === "tots" ? p.name + " (age 4+)" : p.name;
+          return "<option>" + label + "</option>";
+        })
+        .join("");
+    // preserve any pre-selected value if it still exists
+    if (current) {
+      const match = Array.from(progSelect.options).find((o) => o.value === current);
+      if (match) progSelect.value = current;
+    }
   }
 
   /* ---- FAQ: keep one open at a time ---- */
