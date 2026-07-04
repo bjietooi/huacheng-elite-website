@@ -170,10 +170,11 @@ ul { list-style: none; padding: 0; }
 
 /* ---------- Hero ---------- */
 .hero { position: relative; overflow: hidden; padding-block: clamp(3.5rem, 7vw, 6.5rem); }
-/* ink-wash painting video, washed into the cream via multiply + readability fade */
-.hero__video { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-.hero__video video { width: 100%; height: 100%; object-fit: cover; opacity: .55; mix-blend-mode: multiply; }
-.hero__video::after {
+/* ink-wash painting (static still of the original clip — no video per meeting),
+   washed into the cream via multiply + readability fade */
+.hero__wash { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.hero__wash img { width: 100%; height: 100%; object-fit: cover; opacity: .55; mix-blend-mode: multiply; }
+.hero__wash::after {
   content: ""; position: absolute; inset: 0;
   background:
     linear-gradient(90deg, var(--cream) 0%, rgba(237,234,225,.86) 25%, rgba(237,234,225,.30) 52%, rgba(237,234,225,0) 74%),
