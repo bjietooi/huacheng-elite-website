@@ -38,12 +38,12 @@
       blurb: "Our core, structured Wushu curriculum — progressive training that takes general students from the fundamentals to confident routines."
     },
     {
-      id: "elite", name: "Elite Group Classes", level: "Advanced",
+      id: "elite", name: "Elite Group", level: "Advanced",
       age: "By assessment", credits: 1, duration: 90,
       blurb: "For advancing athletes training across all routines — from fists to long and short weapons."
     },
     {
-      id: "competitive", name: "Competitive", level: "Elite",
+      id: "competitive", name: "Competitive Group", level: "Elite",
       age: "By assessment", credits: 2, duration: 120,
       blurb: "High-performance coaching for serious competitors — refining routines, scoring elements and competition strategy."
     },
@@ -53,7 +53,7 @@
       blurb: "A dedicated skills class for jumping and flipping — so students execute dynamic taolu movements safely and powerfully."
     },
     {
-      id: "strength", name: "Strength & Conditioning", level: "Skills",
+      id: "strength", name: "Physical & Jump Conditioning", level: "Skills",
       age: "Age 8+", credits: 1, duration: 60,
       blurb: "Build stamina and strengthen the muscle groups behind powerful Wushu — the perfect complement to Flips & Jumps."
     }
