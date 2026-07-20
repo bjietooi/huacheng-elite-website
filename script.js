@@ -214,18 +214,22 @@ document.addEventListener("DOMContentLoaded", () => {
       .join("");
   }
 
-  /* ---- Sync the enquiry form's programme options with HC.programmes ---- */
+  /* ---- Sync the enquiry form's programme options with HC.programmes ----
+         Private 1-to-1 coaching lives in HC.privateCoaching (it is priced and
+         promoted, but booked by appointment rather than scheduled as a group
+         class), so append it — otherwise this rebuild would silently drop a
+         programme the site actively advertises. ---- */
   const progSelect = document.getElementById("f-prog");
   if (progSelect && HC && Array.isArray(HC.programmes)) {
     const current = progSelect.value;
+    const escLabel = (s) =>
+      String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const labels = HC.programmes
+      .map((p) => (p.id === "tots" ? p.name + " (age 4+)" : p.name))
+      .concat(Array.isArray(HC.privateCoaching) ? HC.privateCoaching.map((p) => p.name) : []);
     progSelect.innerHTML =
       '<option value="Not sure yet">Not sure yet — help me choose</option>' +
-      HC.programmes
-        .map((p) => {
-          const label = p.id === "tots" ? p.name + " (age 4+)" : p.name;
-          return "<option>" + label + "</option>";
-        })
-        .join("");
+      labels.map((label) => "<option>" + escLabel(label) + "</option>").join("");
     // preserve any pre-selected value if it still exists
     if (current) {
       const match = Array.from(progSelect.options).find((o) => o.value === current);
