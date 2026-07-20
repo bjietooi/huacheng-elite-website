@@ -579,7 +579,7 @@
     el.innerHTML =
       '<div class="view__head">' +
         '<h1 class="view__title">Buy credits</h1>' +
-        '<p class="view__sub">One credit books one class. Top up below — checkout is a PayNow mock.</p>' +
+        '<p class="view__sub">One credit books one class. Rates below are Junior-level — Elite, Competitive &amp; private 1-to-1 pricing is on our website. Checkout is a PayNow mock.</p>' +
       "</div>" +
       '<div class="balance-strip">' +
         '<span class="balance-strip__k">Current balance</span>' +

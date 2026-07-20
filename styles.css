@@ -324,10 +324,9 @@ ul { list-style: none; padding: 0; }
 .prog__grid { gap: 0; border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--paper); }
 .prog { position: relative; padding: clamp(1.6rem, 3vw, 2.4rem); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transition: background .3s var(--ease); }
 .prog__grid .prog:nth-child(2n) { border-right: none; }
-/* 7 cards = 3 full rows of 2 + a final full-width card.
-   Cards 5 & 6 form the last paired row; the lone 7th card spans + closes the grid. */
-.prog__grid .prog:nth-child(5),
-.prog__grid .prog:nth-child(6) { border-bottom: none; }
+/* 8 cards = 4 full rows of 2. Cards 7 & 8 form the last row — no bottom border. */
+.prog__grid .prog:nth-child(7),
+.prog__grid .prog:nth-child(8) { border-bottom: none; }
 .prog__grid .prog:last-child:nth-child(odd) { grid-column: 1 / -1; border-right: none; border-bottom: none; }
 .prog:hover { background: var(--cream); }
 .prog__no { font-family: var(--serif); font-size: 1rem; color: var(--copper); font-weight: 600; letter-spacing: .1em; }
@@ -355,6 +354,46 @@ ul { list-style: none; padding: 0; }
 .prog--feature p { color: rgba(247,245,239,.72); }
 .prog--feature .prog__cta { color: var(--paper); }
 .prog--feature .prog__no { color: var(--copper-soft); }
+
+/* ---------- Pricing ---------- */
+.price__grid { gap: 1.4rem; align-items: stretch; }
+.price-card {
+  display: flex; flex-direction: column;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  padding: clamp(1.6rem, 3vw, 2.2rem); position: relative;
+  box-shadow: var(--shadow-sm); transition: transform .3s var(--ease), box-shadow .3s var(--ease);
+}
+.price-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.price-card__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .4rem .9rem; }
+.price-card__name { font-family: var(--serif); font-weight: 600; font-size: 1.55rem; line-height: 1.1; }
+.price-card__cap { font-size: .74rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--copper); white-space: nowrap; }
+.price-card__applies { color: var(--ink-faint); font-size: .88rem; line-height: 1.5; margin: .55rem 0 1.1rem; }
+.price-list { display: flex; flex-direction: column; gap: 0; margin-top: auto; }
+.price-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: .62rem 0; border-top: 1px solid var(--line); }
+.price-list li:last-child { border-bottom: 1px solid var(--line); }
+.price-list__k { color: var(--ink-soft); font-size: .96rem; }
+.price-list__v { font-family: var(--serif); font-weight: 700; font-size: 1.28rem; color: var(--copper-deep); letter-spacing: .01em; }
+.price-list__v small { font-family: var(--sans); font-weight: 500; font-size: .72rem; color: var(--ink-faint); letter-spacing: 0; }
+.price-card__cta { display: inline-flex; align-items: center; gap: .4rem; margin-top: 1.3rem; font-weight: 600; font-size: .94rem; color: var(--copper-deep); align-self: flex-start; transition: gap .25s var(--ease); }
+.price-card__cta span { color: var(--copper); transition: transform .25s var(--ease); }
+.price-card__cta:hover span { transform: translateX(4px); }
+.price-card__badge {
+  position: absolute; top: -1px; right: clamp(1.4rem, 3vw, 2rem);
+  transform: translateY(-50%);
+  font-size: .68rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--cream); background: var(--copper); padding: .28rem .8rem; border-radius: 100px;
+}
+.price-card--feature { background: linear-gradient(160deg, #2c322e, #1c211e); border-color: transparent; color: var(--cream); }
+.price-card--feature .price-card__name { color: var(--paper); }
+.price-card--feature .price-card__cap { color: var(--copper-soft); }
+.price-card--feature .price-card__applies { color: rgba(247,245,239,.6); }
+.price-card--feature .price-list li { border-color: rgba(247,245,239,.14); }
+.price-card--feature .price-list__k { color: rgba(247,245,239,.8); }
+.price-card--feature .price-list__v { color: var(--copper-soft); }
+.price-card--feature .price-list__v small { color: rgba(247,245,239,.55); }
+.price-card--feature .price-card__cta { color: var(--paper); }
+.price-card--feature .price-card__cta span { color: var(--copper-soft); }
+.price__note { color: var(--ink-faint); font-size: .9rem; text-align: center; max-width: 60ch; margin: 2.2rem auto 0; }
 
 /* ---------- Schedule calendar ---------- */
 .cal-wrap { position: relative; }

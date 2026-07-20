@@ -22,41 +22,67 @@
     phoneDisplay: "+65 8888 8888",          // TODO: real display number
     email: "hello@huachengelite.com",       // TODO: real email
     instagram: "https://www.instagram.com/", // TODO: real Instagram handle
-    hours: "Mon–Sun · 10am–10pm"
+    hours: "Mon–Sun · 10am–10pm",
+    address: {
+      line1: "11 Tanjong Katong Road",
+      unit: "#02-35/36 (Kinex Mall)",
+      postal: "Singapore 437157",
+      maps: "https://maps.google.com/?q=Kinex+Mall+11+Tanjong+Katong+Road+Singapore+437157"
+    }
   };
 
-  /* ---- Programmes (6) ---- */
+  /* ---- Programmes (bookable classes) ----
+     Names follow the pricing spreadsheet headings exactly.
+     tier: pricing group → "junior" ($220/$425/$800 for 5/10/20),
+           "elite" ($250/$475/$900), "competitive" (max 6).
+     maxSize: hard cap on class size. */
   HC.programmes = [
     {
-      id: "tots", name: "Wushu Tots", level: "Starter",
-      age: "Age 4+", credits: 1, duration: 60,
+      id: "tots", name: "Wushu Tots", level: "Junior",
+      age: "Age 4+", credits: 1, duration: 60, tier: "junior", maxSize: 20,
       blurb: "A playful, foundational class for our youngest students — building coordination, listening skills and a love of movement."
     },
     {
-      id: "training", name: "Training Program", level: "Foundation",
-      age: "Age 6+", credits: 1, duration: 75,
-      blurb: "Our core, structured Wushu curriculum — progressive training that takes general students from the fundamentals to confident routines."
+      id: "wushu-jr", name: "Wushu Junior", level: "Junior",
+      age: "Age 6+", credits: 1, duration: 75, tier: "junior", maxSize: 20,
+      blurb: "Our core, structured Wushu curriculum — progressive training that takes younger students from the fundamentals to confident routines."
     },
     {
-      id: "elite", name: "Elite Group", level: "Advanced",
-      age: "By assessment", credits: 1, duration: 90,
+      id: "wushu-elite", name: "Wushu Elite", level: "Elite",
+      age: "By assessment", credits: 1, duration: 90, tier: "elite", maxSize: 20,
       blurb: "For advancing athletes training across all routines — from fists to long and short weapons."
     },
     {
-      id: "competitive", name: "Competitive Group", level: "Elite",
-      age: "By assessment", credits: 2, duration: 120,
-      blurb: "High-performance coaching for serious competitors — refining routines, scoring elements and competition strategy."
-    },
-    {
-      id: "flips", name: "Flips & Jumps", level: "Skills",
-      age: "Age 8+", credits: 1, duration: 60,
+      id: "flips-jr", name: "Flips & Jumps (Junior)", level: "Junior",
+      age: "Age 8+", credits: 1, duration: 60, tier: "junior", maxSize: 20,
       blurb: "A dedicated skills class for jumping and flipping — so students execute dynamic taolu movements safely and powerfully."
     },
     {
-      id: "strength", name: "Physical & Jump Conditioning", level: "Skills",
-      age: "Age 8+", credits: 1, duration: 60,
+      id: "flips-elite", name: "Flips & Jumps (Elite)", level: "Elite",
+      age: "Advanced", credits: 1, duration: 60, tier: "elite", maxSize: 20,
+      blurb: "Advanced aerial work — refining height, rotation and landings for competition-standard jumping and flipping."
+    },
+    {
+      id: "cond-jr", name: "Physical & Jumps Conditioning (Junior)", level: "Junior",
+      age: "Age 8+", credits: 1, duration: 60, tier: "junior", maxSize: 20,
       blurb: "Build stamina and strengthen the muscle groups behind powerful Wushu — the perfect complement to Flips & Jumps."
+    },
+    {
+      id: "cond-elite", name: "Physical & Jumps Conditioning (Elite)", level: "Elite",
+      age: "Advanced", credits: 1, duration: 60, tier: "elite", maxSize: 20,
+      blurb: "High-intensity strength and jump conditioning for elite athletes — the engine behind explosive, competition-grade movement."
+    },
+    {
+      id: "competitive", name: "Competitive Private Group", level: "Competitive",
+      age: "By assessment", credits: 1, duration: 120, tier: "competitive", maxSize: 6,
+      blurb: "High-performance coaching in a small group capped at 6 — refining routines, scoring elements and competition strategy."
     }
+  ];
+
+  /* ---- Private 1-to-1 coaching (by appointment, not group-scheduled) ---- */
+  HC.privateCoaching = [
+    { id: "private-royce",  name: "Private Class (Coach Royce)",  ratePerHour: 200 },
+    { id: "private-huaiyu", name: "Private Class (Coach Huaiyu)", ratePerHour: 160 }
   ];
 
   /* ---- Special / seasonal programmes (coming soon) ---- */
@@ -74,12 +100,15 @@
   /* ---- Coaches (generic tags — real profiles deferred) ---- */
   HC.coaches = ["Coach A", "Coach B"];
 
-  /* ---- Credit packages (PayNow checkout is mocked) ---- */
+  /* ---- Credit packages (PayNow checkout is mocked) ----
+     Prices follow the Junior-level class packages on the pricing sheet
+     (5/$220, 10/$425, 20/$800). Elite, Competitive & private 1-to-1
+     rates differ — see the full pricing section on the site. */
   HC.packages = [
-    { id: "trial",   name: "Free Trial",  credits: 1,  price: 0,   tag: "Start here", note: "One complimentary trial class" },
-    { id: "starter", name: "Starter",     credits: 4,  price: 120, tag: "",           note: "4 credits · great for trying a programme" },
-    { id: "value",   name: "Value",       credits: 10, price: 280, tag: "Popular",    note: "10 credits · save vs. drop-in" },
-    { id: "elite",   name: "Elite",       credits: 20, price: 520, tag: "Best value", note: "20 credits · for regular trainers" }
+    { id: "trial",  name: "Free Trial",  credits: 1,  price: 0,   tag: "Start here", note: "One complimentary trial class for new students" },
+    { id: "pack5",  name: "5 Classes",   credits: 5,  price: 220, tag: "",           note: "5 credits · Junior-level rate" },
+    { id: "pack10", name: "10 Classes",  credits: 10, price: 425, tag: "Popular",    note: "10 credits · Junior-level rate" },
+    { id: "pack20", name: "20 Classes",  credits: 20, price: 800, tag: "Best value", note: "20 credits · Junior-level rate" }
   ];
 
   /* ---- Weekly schedule ----
@@ -89,38 +118,42 @@
 
   HC.schedule = [
     // Monday
-    { id: "m1", day: 0, time: "16:00", programmeId: "tots",        coach: "Coach A", capacity: 12, booked: 5 },
-    { id: "m2", day: 0, time: "17:30", programmeId: "training",    coach: "Coach A", capacity: 14, booked: 9 },
-    { id: "m3", day: 0, time: "19:00", programmeId: "elite",       coach: "Coach B", capacity: 10, booked: 7 },
-    { id: "m4", day: 0, time: "20:30", programmeId: "strength",    coach: "Coach B", capacity: 12, booked: 4 },
+    { id: "m1", day: 0, time: "16:00", programmeId: "tots",         coach: "Coach A", capacity: 16, booked: 5 },
+    { id: "m2", day: 0, time: "17:30", programmeId: "wushu-jr",     coach: "Coach A", capacity: 18, booked: 9 },
+    { id: "m3", day: 0, time: "19:00", programmeId: "wushu-elite",  coach: "Coach B", capacity: 14, booked: 7 },
+    { id: "m4", day: 0, time: "20:30", programmeId: "cond-elite",   coach: "Coach B", capacity: 16, booked: 4 },
     // Tuesday
-    { id: "t1", day: 1, time: "16:00", programmeId: "training",    coach: "Coach A", capacity: 14, booked: 6 },
-    { id: "t2", day: 1, time: "17:30", programmeId: "flips",       coach: "Coach B", capacity: 10, booked: 8 },
-    { id: "t3", day: 1, time: "19:00", programmeId: "competitive", coach: "Coach B", capacity: 8,  booked: 6 },
+    { id: "t1", day: 1, time: "16:00", programmeId: "wushu-jr",     coach: "Coach A", capacity: 18, booked: 6 },
+    { id: "t2", day: 1, time: "17:30", programmeId: "flips-jr",     coach: "Coach B", capacity: 14, booked: 8 },
+    { id: "t3", day: 1, time: "19:00", programmeId: "competitive",  coach: "Coach B", capacity: 6,  booked: 5 },
+    { id: "t4", day: 1, time: "20:30", programmeId: "wushu-elite",  coach: "Coach B", capacity: 14, booked: 6 },
     // Wednesday
-    { id: "w1", day: 2, time: "16:00", programmeId: "tots",        coach: "Coach A", capacity: 12, booked: 3 },
-    { id: "w2", day: 2, time: "17:30", programmeId: "training",    coach: "Coach A", capacity: 14, booked: 11 },
-    { id: "w3", day: 2, time: "19:00", programmeId: "elite",       coach: "Coach B", capacity: 10, booked: 9 },
-    { id: "w4", day: 2, time: "20:30", programmeId: "flips",       coach: "Coach B", capacity: 10, booked: 5 },
+    { id: "w1", day: 2, time: "16:00", programmeId: "tots",         coach: "Coach A", capacity: 16, booked: 3 },
+    { id: "w2", day: 2, time: "17:30", programmeId: "wushu-jr",     coach: "Coach A", capacity: 18, booked: 16 },
+    { id: "w3", day: 2, time: "19:00", programmeId: "wushu-elite",  coach: "Coach B", capacity: 14, booked: 9 },
+    { id: "w4", day: 2, time: "20:30", programmeId: "flips-elite",  coach: "Coach B", capacity: 14, booked: 5 },
     // Thursday
-    { id: "h1", day: 3, time: "16:00", programmeId: "training",    coach: "Coach A", capacity: 14, booked: 7 },
-    { id: "h2", day: 3, time: "17:30", programmeId: "strength",    coach: "Coach B", capacity: 12, booked: 5 },
-    { id: "h3", day: 3, time: "19:00", programmeId: "competitive", coach: "Coach B", capacity: 8,  booked: 7 },
+    { id: "h1", day: 3, time: "16:00", programmeId: "wushu-jr",     coach: "Coach A", capacity: 18, booked: 7 },
+    { id: "h2", day: 3, time: "17:30", programmeId: "cond-jr",      coach: "Coach B", capacity: 16, booked: 5 },
+    { id: "h3", day: 3, time: "19:00", programmeId: "competitive",  coach: "Coach B", capacity: 6,  booked: 4 },
+    { id: "h4", day: 3, time: "20:30", programmeId: "flips-jr",     coach: "Coach B", capacity: 14, booked: 6 },
     // Friday
-    { id: "f1", day: 4, time: "16:00", programmeId: "tots",        coach: "Coach A", capacity: 12, booked: 6 },
-    { id: "f2", day: 4, time: "17:30", programmeId: "elite",       coach: "Coach B", capacity: 10, booked: 8 },
-    { id: "f3", day: 4, time: "19:00", programmeId: "training",    coach: "Coach A", capacity: 14, booked: 10 },
+    { id: "f1", day: 4, time: "16:00", programmeId: "tots",         coach: "Coach A", capacity: 16, booked: 6 },
+    { id: "f2", day: 4, time: "17:30", programmeId: "wushu-elite",  coach: "Coach B", capacity: 14, booked: 8 },
+    { id: "f3", day: 4, time: "19:00", programmeId: "wushu-jr",     coach: "Coach A", capacity: 18, booked: 10 },
+    { id: "f4", day: 4, time: "20:30", programmeId: "cond-elite",   coach: "Coach B", capacity: 16, booked: 5 },
     // Saturday
-    { id: "s1", day: 5, time: "10:00", programmeId: "tots",        coach: "Coach A", capacity: 12, booked: 9 },
-    { id: "s2", day: 5, time: "11:30", programmeId: "training",    coach: "Coach A", capacity: 14, booked: 12 },
-    { id: "s3", day: 5, time: "13:30", programmeId: "flips",       coach: "Coach B", capacity: 10, booked: 6 },
-    { id: "s4", day: 5, time: "15:00", programmeId: "elite",       coach: "Coach B", capacity: 10, booked: 8 },
-    { id: "s5", day: 5, time: "16:30", programmeId: "competitive", coach: "Coach B", capacity: 8,  booked: 5 },
+    { id: "s1", day: 5, time: "10:00", programmeId: "tots",         coach: "Coach A", capacity: 16, booked: 9 },
+    { id: "s2", day: 5, time: "11:30", programmeId: "wushu-jr",     coach: "Coach A", capacity: 18, booked: 18 },
+    { id: "s3", day: 5, time: "13:30", programmeId: "flips-jr",     coach: "Coach B", capacity: 14, booked: 6 },
+    { id: "s4", day: 5, time: "15:00", programmeId: "wushu-elite",  coach: "Coach B", capacity: 14, booked: 8 },
+    { id: "s5", day: 5, time: "16:30", programmeId: "competitive",  coach: "Coach B", capacity: 6,  booked: 5 },
+    { id: "s6", day: 5, time: "18:00", programmeId: "flips-elite",  coach: "Coach B", capacity: 14, booked: 4 },
     // Sunday
-    { id: "u1", day: 6, time: "10:00", programmeId: "tots",        coach: "Coach A", capacity: 12, booked: 4 },
-    { id: "u2", day: 6, time: "11:30", programmeId: "training",    coach: "Coach A", capacity: 14, booked: 8 },
-    { id: "u3", day: 6, time: "13:30", programmeId: "strength",    coach: "Coach B", capacity: 12, booked: 3 },
-    { id: "u4", day: 6, time: "15:00", programmeId: "elite",       coach: "Coach B", capacity: 10, booked: 6 }
+    { id: "u1", day: 6, time: "10:00", programmeId: "tots",         coach: "Coach A", capacity: 16, booked: 4 },
+    { id: "u2", day: 6, time: "11:30", programmeId: "wushu-jr",     coach: "Coach A", capacity: 18, booked: 8 },
+    { id: "u3", day: 6, time: "13:30", programmeId: "cond-jr",      coach: "Coach B", capacity: 16, booked: 3 },
+    { id: "u4", day: 6, time: "15:00", programmeId: "wushu-elite",  coach: "Coach B", capacity: 14, booked: 6 }
   ];
 
   /* ---- Demo account (the mocked "logged-in" parent) ---- */
