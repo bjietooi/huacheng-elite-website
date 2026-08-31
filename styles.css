@@ -13,6 +13,8 @@
   --copper:       #b0703e;
   --copper-deep:  #8f5527;
   --copper-soft:  #c79466;
+  --seal:         #a33122;   /* cinnabar — the seal mark on light grounds */
+  --seal-light:   #c8604a;   /* lifted cinnabar — the seal mark on ink */
   --line:         rgba(35, 40, 37, 0.14);
   --line-strong:  rgba(35, 40, 37, 0.28);
   --wa:           #25d366;
@@ -138,8 +140,13 @@ ul { list-style: none; padding: 0; }
 
 /* ---------- Brand / logo ---------- */
 .brand { display: inline-flex; align-items: center; gap: .7rem; color: var(--ink); }
-.brand__mark { width: 34px; color: var(--copper); flex: none; }
-.brand__mark svg { width: 100%; display: block; }
+.brand__mark {
+  width: 34px; aspect-ratio: 1; flex: none;
+  color: var(--seal);
+  background: currentColor;
+  -webkit-mask: url("images/logo-seal-mask.png") center / contain no-repeat;
+          mask: url("images/logo-seal-mask.png") center / contain no-repeat;
+}
 .brand__text { display: flex; flex-direction: column; line-height: 1; }
 .brand__name { font-family: var(--serif); font-weight: 600; font-size: 1.32rem; letter-spacing: .01em; }
 .brand__cn { font-size: .72rem; letter-spacing: .35em; color: var(--ink-faint); margin-top: .18rem; padding-left: .04rem; }
@@ -555,7 +562,7 @@ a.contact__v:hover { color: var(--copper); }
 .footer { background: var(--ink); color: rgba(247,245,239,.72); padding-top: clamp(3rem, 6vw, 4.5rem); }
 .footer__grid { display: grid; grid-template-columns: 1.6fr 1fr 1.2fr; gap: clamp(2rem, 5vw, 4rem); padding-bottom: 3rem; }
 .brand--footer { color: var(--cream); margin-bottom: 1.3rem; }
-.brand--footer .brand__mark { color: var(--copper-soft); }
+.brand--footer .brand__mark { color: var(--seal-light); }
 .brand--footer .brand__cn { color: rgba(247,245,239,.45); }
 .footer__tag { max-width: 38ch; font-family: var(--serif); font-style: italic; font-size: 1.2rem; line-height: 1.4; color: rgba(247,245,239,.85); }
 .footer__cn { margin-top: 1.1rem; font-size: 1.7rem; line-height: 1.3; color: rgba(199,148,102,.7); }

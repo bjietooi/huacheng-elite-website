@@ -15,6 +15,8 @@
   --copper:       #b0703e;
   --copper-deep:  #8f5527;
   --copper-soft:  #c79466;
+  --seal:         #a33122;
+  --seal-light:   #c8604a;
   --line:         rgba(35, 40, 37, 0.14);
   --line-strong:  rgba(35, 40, 37, 0.28);
   --wa:           #25d366;
@@ -75,8 +77,13 @@ ul { list-style: none; padding: 0; }
 
 /* ---------- Brand / logo ---------- */
 .brand { display: inline-flex; align-items: center; gap: .7rem; color: var(--ink); }
-.brand__mark { width: 32px; color: var(--copper); flex: none; }
-.brand__mark svg { width: 100%; display: block; }
+.brand__mark {
+  width: 32px; aspect-ratio: 1; flex: none;
+  color: var(--seal);
+  background: currentColor;
+  -webkit-mask: url("images/logo-seal-mask.png") center / contain no-repeat;
+          mask: url("images/logo-seal-mask.png") center / contain no-repeat;
+}
 .brand__text { display: flex; flex-direction: column; line-height: 1; }
 .brand__name { font-family: var(--serif); font-weight: 600; font-size: 1.28rem; letter-spacing: .01em; }
 .brand__cn { font-size: .68rem; letter-spacing: .32em; color: var(--ink-faint); margin-top: .18rem; padding-left: .04rem; }
@@ -138,12 +145,14 @@ ul { list-style: none; padding: 0; }
   position: relative;
   overflow: hidden;
 }
-/* faint calligraphy backdrop */
+/* ghosted seal backdrop */
 .auth__bg {
-  position: absolute; right: -4%; top: 50%; transform: translateY(-50%);
-  font-size: clamp(16rem, 42vw, 40rem); line-height: .85;
-  color: var(--ink); opacity: .04; white-space: nowrap; pointer-events: none;
-  user-select: none; writing-mode: vertical-rl; z-index: 0;
+  position: absolute; right: -8%; top: 50%; transform: translateY(-50%);
+  width: clamp(22rem, 46vw, 42rem); aspect-ratio: 1;
+  background: var(--seal); opacity: .05; pointer-events: none; user-select: none;
+  -webkit-mask: url("images/logo-seal-mask.png") center / contain no-repeat;
+          mask: url("images/logo-seal-mask.png") center / contain no-repeat;
+  z-index: 0;
 }
 .auth__top { position: relative; z-index: 2; padding: clamp(1.2rem, 4vw, 2rem) clamp(1.2rem, 4vw, 2.5rem); }
 .auth__back { display: inline-flex; align-items: center; gap: .45rem; font-size: .9rem; color: var(--ink-soft); transition: color .2s; }
