@@ -251,11 +251,7 @@
         '<p class="cd-meta">Blocked by ' + whoWhen(occ.statusBy, occ.statusAt) + "</p>"));
     }
 
-    if (occ.oneOff) {
-      out.push(h.notice("info",
-        "<p><strong>One-off class</strong> — runs on this date only and isn't part of the weekly timetable.</p>" +
-        (occ.note ? reasonLine(occ.note) : "")));
-    }
+    if (occ.oneOff) out.push(oneOffNotice(occ));
 
     if (occ.substituted) {
       out.push(h.notice("info",
@@ -265,6 +261,68 @@
 
     if (!out.length) return "";
     return '<div class="drawer__section cd-status">' + out.join("") + "</div>";
+  }
+
+  function groupOf(occ) { return occ.groupId && db.oneOffGroup ? db.oneOffGroup(occ.groupId) : null; }
+
+  function groupName(occ, group) { return (group && group.name) || occ.groupName || "this group of sessions"; }
+
+  // A plain one-off, or one session of a named group (e.g. a camp):
+  // "Part of June Boot Camp — session 4 of 15 (Mon 5 Oct – Fri 23 Oct)" + previous / next session
+  function oneOffNotice(occ) {
+    var group = groupOf(occ);
+    if (!group) {
+      return h.notice("info",
+        "<p><strong>One-off class</strong> — runs on this date only and isn't part of the weekly timetable.</p>" +
+        (occ.note ? reasonLine(occ.note) : ""));
+    }
+    var list = group.sessions;
+    var i = -1;
+    list.some(function (o, n) { if (o.key === occ.key) { i = n; return true; } return false; });
+    var name = groupName(occ, group);
+    var range = group.first === group.last ? fmt.date(group.first) : fmt.date(group.first) + " – " + fmt.date(group.last);
+    var deleted = list.filter(function (o) { return o.status === "removed"; }).length;
+    var facts = [group.remaining ? Admin.plural(group.remaining, "session") + " still to come" : "no sessions left to run"];
+    if (deleted) facts.push(deleted + " deleted");
+    var prev = i > 0 ? list[i - 1] : null;
+    var next = i >= 0 && i < list.length - 1 ? list[i + 1] : null;
+    return h.notice("info",
+      '<p class="cd-group"><strong>Part of ' + esc(name) + "</strong> — " +
+        (i >= 0 ? "session " + (i + 1) + " of " + group.total + " " : "") + "(" + esc(range) + ").</p>" +
+      '<p class="cd-meta">One-off sessions, not on the weekly timetable · ' + esc(facts.join(" · ")) + ".</p>" +
+      (occ.note && occ.note !== name ? reasonLine(occ.note) : "") +
+      (prev || next
+        ? '<div class="btn-row cd-notice__actions cd-group-nav">' +
+            (prev ? sessionLink("cdGroupPrev", prev, "Previous", "cd-group-nav__prev") : "") +
+            (next ? sessionLink("cdGroupNext", next, "Next", "cd-group-nav__next") : "") +
+          "</div>"
+        : ""));
+  }
+
+  // previous / next session — opened by the core's [data-open-class] handler
+  function sessionLink(id, o, label, cls) {
+    // the word drops on phones so both links fit on one line; the chevron still shows the way
+    var text = '<span class="cd-group-nav__word">' + esc(label) + ": </span>" +
+      esc(fmt.date(o.date) + (o.status === "removed" ? " (deleted)" : ""));
+    var chev = icon(label === "Previous" ? "chevron-left" : "chevron-right");
+    return '<button type="button" class="btn btn--quiet btn--xs ' + cls + '" id="' + id + '" data-open-class="' + esc(o.key) + '"' +
+      ' aria-label="' + esc(label + " session, " + fmt.date(o.date, "full") + (o.status === "removed" ? " (deleted)" : "")) + '">' +
+      (label === "Previous" ? chev + text : text + chev) + "</button>";
+  }
+
+  // What "Delete…" offers: weekly class → this date or the whole series (admin);
+  // grouped one-off → this session or this and later sessions (admin)
+  function deleteScope(occ) {
+    if (Admin.can("series") && occ.templateId) {
+      return { title: "Delete this date only, or the weekly class", hint: "Delete cancels this date, or the whole weekly class. " };
+    }
+    if (occ.groupId && Admin.can("oneoff")) {
+      return {
+        title: "Delete this session only, or this and later sessions",
+        hint: "Delete cancels this session, or this and later sessions of " + groupName(occ, null) + ". "
+      };
+    }
+    return { title: "Delete this date only", hint: "Delete cancels this date only. " };
   }
 
   // opens the Leave view with this leave highlighted (#leave?show=<id>)
@@ -372,8 +430,7 @@
       btns.push(actionBtn("coach", "swap", "Change coach", "ghost"));
     }
     if (!occ.started && Admin.deleteClass) {
-      btns.push(actionBtn("delete", "trash", "Delete…", "danger",
-        ' title="Delete this date only' + (Admin.can("series") && occ.templateId ? ", or the weekly class" : "") + '"'));
+      btns.push(actionBtn("delete", "trash", "Delete…", "danger", ' title="' + esc(deleteScope(occ).title) + '"'));
     }
 
     if (occ.started) {
@@ -382,11 +439,7 @@
           : " — it can no longer be blocked or deleted.");
     } else if (occ.status === "open" && (Admin.blockClass || Admin.deleteClass)) {
       text = (Admin.blockClass ? "Block keeps the class on the timetable but stops parent bookings. " : "") +
-        (Admin.deleteClass
-          ? (Admin.can("series") && occ.templateId
-            ? "Delete cancels this date, or the whole weekly class. "
-            : "Delete cancels this date only. ")
-          : "") +
+        (Admin.deleteClass ? deleteScope(occ).hint : "") +
         (occ.booked === 1 ? "The booked student's credit goes back to their family, and the parent is told."
           : occ.booked > 1 ? "Credits for all " + occ.booked + " booked students go back to their families, and parents are told."
           : "");
@@ -592,7 +645,9 @@
   /* ---------- 5. footer meta ---------- */
   function footSection(occ) {
     var bits = [];
-    if (occ.oneOff && occ.createdBy) bits.push("One-off class added by " + esc(actor(occ.createdBy)));
+    if (occ.oneOff && occ.createdBy) {
+      bits.push((occ.groupId ? esc(groupName(occ, groupOf(occ))) + " added by " : "One-off class added by ") + esc(actor(occ.createdBy)));
+    }
     if (occ.substituted && occ.substituteBy) bits.push("Cover arranged by " + esc(actor(occ.substituteBy)));
     if (occ.statusBy || occ.statusAt) {
       var verb = occ.status === "removed" ? (occ.removedScope === "series" ? "Weekly class deleted" : "Deleted")

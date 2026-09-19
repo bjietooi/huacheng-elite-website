@@ -20,6 +20,10 @@
 }
 .cd-meta { margin-top: .25rem; font-size: .78rem; color: var(--ink-faint); }
 .cd-notice__actions { margin-top: .55rem; }
+/* previous / next session of a grouped one-off (e.g. a camp) */
+.cd-group-nav { justify-content: space-between; gap: .4rem; }
+.cd-group-nav .ic { width: 14px; height: 14px; }
+.cd-group-nav__next { margin-left: auto; }
 
 /* ---------- summary: class state + attendance + numbers ---------- */
 .cd-state {
@@ -241,6 +245,7 @@
 
   /* separators would dangle at the end of a wrapped line: let the gap do the work */
   .drawer__sub .cd-head__sep { display: none; }
+  .cd-group-nav__word { display: none; }
   .cd-stu__sub { column-gap: .6rem; }
   .cd-stu__sub .cd-sep { display: none; }
   /* the phone number sits on its own line, away from the parent link */

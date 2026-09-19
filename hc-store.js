@@ -299,7 +299,8 @@
       return {
         key: key, date: o.date, templateId: null, oneOffId: o.id, time: o.time,
         programmeId: o.programmeId, coach: o.coach, capacity: o.capacity,
-        duration: o.duration, note: o.note || "", createdBy: o.by
+        duration: o.duration, note: o.note || "", createdBy: o.by,
+        groupId: o.groupId || null, groupName: o.groupName || ""
       };
     }
     var t = template(k.id);
@@ -356,6 +357,8 @@
       oneOff: !!base.oneOffId,
       note: base.note,
       createdBy: base.createdBy,
+      groupId: base.groupId || null,     // one-off sessions created together (e.g. a camp)
+      groupName: base.groupName || "",
       status: "open",       // open | blocked | removed
       blockKind: null,      // manual | leave
       removedScope: null,   // one | series
@@ -511,6 +514,25 @@
     var reason = opts.reason || "";
     var refunded = 0;
 
+    if (opts.scope === "group") {
+      if (!occ.groupId) return fail("This class isn't part of a group of sessions.");
+      var group = oneOffGroup(occ.groupId);
+      var targets = group.sessions.filter(function (o) {
+        return o.status !== "removed" && !o.started && (o.date > occ.date || (o.date === occ.date && o.time >= occ.time));
+      });
+      targets.forEach(function (o) {
+        var gov = DB.overrides[o.key] = DB.overrides[o.key] || {};
+        gov.status = "removed"; gov.reason = reason; gov.by = opts.by; gov.at = at;
+        rev++;
+        refunded += cancelActiveBookings(o.key, opts.by, "Class cancelled" + (reason ? " — " + reason : ""), at);
+      });
+      audit(opts.by, "remove", "Deleted " + targets.length + " session" + (targets.length === 1 ? "" : "s") + " of " +
+        (group.name || occ.name) + " from " + formatDate(occ.date) +
+        (refunded ? " (" + refunded + " booking" + (refunded === 1 ? "" : "s") + " refunded)" : ""), at);
+      done(opts, { type: "remove", key: key });
+      return { ok: true, refunded: refunded, sessions: targets.length };
+    }
+
     if (opts.scope === "series") {
       if (!occ.templateId) return fail("One-off classes have no weekly series.");
       DB.seriesEnds[occ.templateId] = { from: occ.date, reason: reason, by: opts.by, at: at };
@@ -611,13 +633,88 @@
       capacity: capacity,
       duration: duration,
       note: (data.note || "").trim(),
+      groupId: data.groupId || null,
+      groupName: data.groupId ? String(data.groupName || "").trim() : "",
       by: opts.by,
       at: opts.at || nowStamp()
     };
     DB.oneOffs.push(o);
-    audit(opts.by, "one-off", "Added one-off " + prog.name + " · " + formatDate(o.date) + " " + HC.formatTime(o.time) + " (" + o.coach + ")", o.at);
+    if (!opts.quietAudit) {
+      audit(opts.by, "one-off", "Added one-off " + prog.name + " · " + formatDate(o.date) + " " + HC.formatTime(o.time) + " (" + o.coach + ")", o.at);
+    }
     done(opts, { type: "one-off", key: occKey(o.date, o.id) });
     return { ok: true, key: occKey(o.date, o.id) };
+  }
+
+  // Every date in the given ranges that falls on one of the weekdays (0 = Mon).
+  // ranges: [{ from, to }] — to is optional (one day). Sorted, no duplicates.
+  function datesFromRanges(ranges, weekdays) {
+    var days = Array.isArray(weekdays) && weekdays.length ? weekdays : [0, 1, 2, 3, 4, 5, 6];
+    var out = {};
+    (ranges || []).forEach(function (r) {
+      if (!r || !/^\d{4}-\d{2}-\d{2}$/.test(r.from || "")) return;
+      var to = /^\d{4}-\d{2}-\d{2}$/.test(r.to || "") && r.to >= r.from ? r.to : r.from;
+      for (var d = r.from, n = 0; d <= to && n < 93; d = addDays(d, 1), n++) {
+        if (days.indexOf(dayIndex(d)) >= 0) out[d] = 1;
+      }
+    });
+    return Object.keys(out).sort();
+  }
+
+  var MAX_BATCH = 60;
+
+  // One-off sessions on many dates at once (a camp, a holiday programme…),
+  // grouped under one name so they can be found and cancelled together.
+  // data: { dates:[iso], time, programmeId, coach, capacity, duration, groupName, note }
+  // Returns { ok, groupId, keys, skipped: [{ date, error }] }.
+  function addOneOffs(data, opts) {
+    opts = opts || {};
+    load();
+    var dates = (data.dates || []).slice().sort();
+    if (!dates.length) return fail("Choose at least one date.");
+    if (dates.length > MAX_BATCH) return fail("That's " + dates.length + " sessions — add at most " + MAX_BATCH + " at a time.");
+    var name = String(data.groupName || "").trim();
+    if (!name) return fail("Give the sessions a name, e.g. June Boot Camp.");
+    var at = opts.at || nowStamp();
+    var groupId = nextId("G");
+    var keys = [], skipped = [];
+    dates.forEach(function (date) {
+      var res = addOneOff({
+        date: date, time: data.time, programmeId: data.programmeId, coach: data.coach,
+        capacity: data.capacity, duration: data.duration,
+        note: String(data.note || "").trim() || name, groupId: groupId, groupName: name
+      }, { by: opts.by, at: at, allowPast: opts.allowPast, silent: true, quietAudit: true });
+      if (res.ok) keys.push(res.key); else skipped.push({ date: date, error: res.error });
+    });
+    if (!keys.length) {
+      rev++;
+      return fail(skipped.length ? skipped[0].error : "No sessions were added.", { skipped: skipped });
+    }
+    var prog = HC.getProgramme(data.programmeId) || {};
+    var first = splitKey(keys[0]).date, last = splitKey(keys[keys.length - 1]).date;
+    audit(opts.by, "one-off", "Added " + name + " — " + keys.length + " session" + (keys.length === 1 ? "" : "s") + " of " +
+      (prog.name || "class") + " at " + HC.formatTime(data.time) + " (" + data.coach + "), " +
+      formatDate(first, "day") + (first !== last ? " – " + formatDate(last, "day") : ""), at);
+    done(opts, { type: "one-off", key: keys[0] });
+    return { ok: true, groupId: groupId, keys: keys, skipped: skipped };
+  }
+
+  // Every session in a group, in date order, with its current state.
+  function oneOffGroup(groupId) {
+    load();
+    var list = DB.oneOffs.filter(function (o) { return o.groupId && o.groupId === groupId; })
+      .sort(function (a, b) { return a.date.localeCompare(b.date) || a.time.localeCompare(b.time); });
+    if (!list.length) return null;
+    var sessions = list.map(function (o) { return occurrence(occKey(o.date, o.id)); }).filter(Boolean);
+    return {
+      id: groupId,
+      name: list[0].groupName || "",
+      sessions: sessions,
+      total: sessions.length,
+      remaining: sessions.filter(function (o) { return o.status !== "removed" && !o.started; }).length,
+      first: list[0].date,
+      last: list[list.length - 1].date
+    };
   }
 
   // Classes that clash with a proposed slot for the same coach (warning only).
@@ -2108,6 +2205,7 @@
     blockOccurrence: blockOccurrence, unblockOccurrence: unblockOccurrence,
     removeOccurrence: removeOccurrence, restoreOccurrence: restoreOccurrence,
     substituteCoach: substituteCoach, addOneOff: addOneOff, clashes: clashes, seriesEnd: seriesEnd,
+    addOneOffs: addOneOffs, datesFromRanges: datesFromRanges, oneOffGroup: oneOffGroup,
 
     // leave
     leaves: leaves, leaveFor: leaveFor, leaveImpact: leaveImpact, addLeave: addLeave, removeLeave: removeLeave,

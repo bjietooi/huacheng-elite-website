@@ -22,7 +22,11 @@
      Admin.restoreClass(key)
      Admin.substituteCoach(key)                       (admin)
      Admin.addOneOff([{ date, time, programmeId, coach,
-                        duration, capacity, note }])  (admin)
+                        duration, capacity, note,
+                        mode: "one" | "many", groupName }])  (admin)
+
+   "Several dates (camp)" adds one-off sessions on many dates under one
+   name (HC.db.addOneOffs); they can be deleted together from a date on.
    ============================================================ */
 (function () {
   "use strict";
@@ -146,7 +150,12 @@
   // the chips that add to the status: one-off, cover, full
   function extraChips(occ) {
     var out = [];
-    if (occ.oneOff) out.push(h.chip("One-off", "oneoff", occ.note));
+    if (occ.groupId) {
+      var g = groupOf(occ.groupId);
+      var n = sessionNumber(g, occ.key);
+      out.push(h.chip(groupLabel(occ), "oneoff chip--group",
+        g && n ? "Session " + n + " of " + g.total + " · " + occ.groupName : occ.groupName));
+    } else if (occ.oneOff) out.push(h.chip("One-off", "oneoff", occ.note));
     if (occ.substituted) {
       out.push(h.chip("Cover for " + occ.originalCoach, "sub",
         who(occ.coach) === "You" ? "You're covering this date" : occ.coach + " is covering this date"));
@@ -156,6 +165,41 @@
   }
 
   function needsMarking(occ) { return h.attendance(occ).key === "todo"; }
+
+  // One-off sessions created together (a camp). Cached while a view renders —
+  // every card of a camp asks for the same group.
+  var groupCache = null;
+  function groupOf(id) {
+    if (!id) return null;
+    if (groupCache && Object.prototype.hasOwnProperty.call(groupCache, id)) return groupCache[id];
+    var g = db.oneOffGroup(id);
+    if (groupCache) groupCache[id] = g;
+    return g;
+  }
+
+  // 3 for the third session of its group (deleted sessions keep their number)
+  function sessionNumber(g, key) {
+    for (var i = 0; g && i < g.sessions.length; i++) {
+      if (g.sessions[i].key === key) return i + 1;
+    }
+    return 0;
+  }
+
+  // this session and every later one of its group that can still be deleted
+  function groupTargets(occ) {
+    var g = groupOf(occ.groupId);
+    if (!g) return [];
+    return g.sessions.filter(function (o) {
+      return o.status !== "removed" && !o.started && (o.date > occ.date || (o.date === occ.date && o.time >= occ.time));
+    });
+  }
+
+  // "June Boot Camp · 3/15"
+  function groupLabel(occ) {
+    var g = groupOf(occ.groupId);
+    var n = sessionNumber(g, occ.key);
+    return (occ.groupName || "Camp") + (g && n ? " · " + n + "/" + g.total : "");
+  }
 
   function openClashes(date, time, duration, coach, ignoreKey) {
     return db.clashes(date, time, duration, coach, ignoreKey).filter(function (o) { return o.status === "open"; });
@@ -240,6 +284,12 @@
   Admin.registerView("schedule", { render: renderView });
 
   function renderView(el, params) {
+    groupCache = {};
+    try { paintView(el, params); }
+    finally { groupCache = null; }
+  }
+
+  function paintView(el, params) {
     var st = readParams(params);
     var coachView = coachMode();
     var phone = isPhone();
@@ -595,7 +645,7 @@
       var why = occ.reason || (occ.blockKind === "leave" ? "Coach on leave" : "");
       if (why) body += '<p class="sch-card__reason">' + esc(why) + "</p>";
     }
-    if (occ.oneOff && occ.note) body += '<p class="sch-card__note">' + esc(occ.note) + "</p>";
+    if (occ.oneOff && occ.note && occ.note !== occ.groupName) body += '<p class="sch-card__note">' + esc(occ.note) + "</p>";
 
     body += '<div class="sch-card__foot">' +
         '<span class="chips sch-card__chips">' + statusChip(occ) + extraChips(occ) + "</span>" +
@@ -627,7 +677,11 @@
       parts.push(cs.key === "now" ? "happening now" : cs.label.toLowerCase());
       parts.push(occ.booked + " of " + occ.capacity + " booked" + (occ.spotsLeft === 0 ? ", full" : ""));
     }
-    if (occ.oneOff) parts.push("one-off class");
+    if (occ.groupId) {
+      var g = groupOf(occ.groupId);
+      var n = sessionNumber(g, occ.key);
+      parts.push((g && n ? "session " + n + " of " + g.total + ", " : "") + occ.groupName);
+    } else if (occ.oneOff) parts.push("one-off class");
     if (occ.substituted) parts.push((who(occ.coach) === "You" ? "you're covering for " : "covering for ") + occ.originalCoach);
     var att = h.attendance(occ);
     if (att.key === "done" || att.key === "todo") parts.push(att.label);
@@ -833,6 +887,13 @@
       } else if (admin) {
         danger.push({ act: "delete", ic: "trash", label: "Delete this date…", hint: startedHint, disabled: true, danger: true });
       }
+      if (Admin.can("oneoff") && occ.groupId && !occ.started) {
+        var later = groupTargets(occ).length - 1;
+        if (later > 0) {
+          danger.push({ act: "group", ic: "trash", label: "Delete this and later sessions…",
+            hint: plural(later + 1, "session") + " of " + occ.groupName, danger: true });
+        }
+      }
       if (Admin.can("series") && occ.templateId) {
         danger.push(occ.started
           ? { act: "series", ic: "trash", label: "Delete this and later weeks…", hint: startedHint, disabled: true, danger: true }
@@ -955,6 +1016,7 @@
       case "unblock": Admin.unblockClass(key); break;
       case "delete": Admin.deleteClass(key); break;
       case "series": Admin.deleteClass(key, { scope: "series" }); break;
+      case "group": Admin.deleteClass(key, { scope: "group" }); break;
       case "restore": Admin.restoreClass(key); break;
       case "coach": Admin.substituteCoach(key); break;
     }
@@ -1268,9 +1330,20 @@
       return;
     }
 
+    // camps: this session and the later ones, together (admin)
+    var groupList = occ.groupId && Admin.can("oneoff") ? groupTargets(occ) : [];
+    var groupOk = groupList.length > 1;
+    if (opts.scope === "group" && !groupOk) {
+      Admin.toast("warn", !occ.groupId ? "This class isn't part of a group of sessions."
+        : !Admin.can("oneoff") ? "Only an admin can delete several sessions at once."
+        : "There are no later sessions — delete this date on its own.");
+      return;
+    }
+
     var focusBack = rememberFocus();
-    var scope = opts.scope === "series" ? "series" : "one";
+    var scope = opts.scope === "series" || opts.scope === "group" ? opts.scope : "one";
     var impact = seriesOk ? seriesImpact(occ) : null;
+    var groupLast = groupOk ? groupList[groupList.length - 1] : null;
     var dayName = HC.dayNames[occ.day];
     var when = fmt.time(occ.time);
     var date = fmt.date(occ.date);
@@ -1285,8 +1358,13 @@
             '<legend class="field__label">What should be deleted?</legend>' +
             '<div class="choices">' +
               choice("schScope", "one", "Only " + date,
-                occ.oneOff ? "This one-off class won't run." : "The weekly class carries on as usual on other dates.",
+                occ.groupId ? "The other sessions of " + occ.groupName + " stay as they are."
+                  : occ.oneOff ? "This one-off class won't run." : "The weekly class carries on as usual on other dates.",
                 scope === "one") +
+              (groupOk ? choice("schScope", "group",
+                "This and the " + plural(groupList.length - 1, "later session") + " of " + occ.groupName,
+                "Every session from " + date + " to " + fmt.date(groupLast.date) + ". Earlier sessions stay.",
+                scope === "group") : "") +
               (seriesOk ? choice("schScope", "series", "This and later weeks",
                 "Every " + dayName + " at " + when + ", from " + date + " onwards.", scope === "series") : "") +
             "</div>" +
@@ -1298,8 +1376,7 @@
             '<input type="text" id="schDelReason" maxlength="140" autocomplete="off" placeholder="e.g. Hall booked for grading" />' +
           "</div>" +
           '<div id="schDelImpact" aria-live="polite"></div>' +
-          '<p class="sch-aside">' + icon("undo") + "<span>Changed your mind? Tick “Show deleted” on " +
-            esc(scheduleName()) + " to restore it.</span></p>" +
+          '<p class="sch-aside">' + icon("undo") + '<span id="schDelUndo"></span></p>' +
           '<p class="field-error form-error sch-form-error" role="alert"></p>' +
         "</form>",
       actions:
@@ -1313,12 +1390,16 @@
 
         function current() {
           var r = card.querySelector('input[name="schScope"]:checked');
-          return r && r.value === "series" && seriesOk ? "series" : "one";
+          if (r && r.value === "series" && seriesOk) return "series";
+          if (r && r.value === "group" && groupOk) return "group";
+          return "one";
         }
 
         function paint() {
           var s = current();
           var n = occ.booked;
+          card.querySelector("#schDelUndo").textContent = "Changed your mind? Tick “Show deleted” on " + scheduleName() +
+            (s === "group" ? " to restore sessions one at a time." : " to restore it.");
           if (s === "series") {
             box.innerHTML = h.notice("warn",
               "<p><strong>This changes the weekly timetable.</strong> " + esc(occ.name) + " stops running every " +
@@ -1328,6 +1409,17 @@
                   esc(plural(impact.dates, "date")) + " will be refunded and notified."
                 : "No upcoming bookings are affected.") + "</p>");
             go.innerHTML = icon("trash") + SERIES_LABEL;
+          } else if (s === "group") {
+            var nb = 0, withB = 0;
+            groupList.forEach(function (o) { nb += o.booked; if (o.booked) withB++; });
+            box.innerHTML = h.notice(nb ? "warn" : "info",
+              "<p><strong>" + esc(plural(groupList.length, "session")) + "</strong> of " + esc(occ.groupName) +
+                " will be deleted — " + nw(date) + " to " + nw(fmt.date(groupLast.date)) + ".</p>" +
+              "<p>" + (nb
+                ? "<strong>" + esc(plural(nb, "booked student")) + "</strong> across " + esc(plural(withB, "session")) +
+                  " will be refunded and notified."
+                : "No one has booked these sessions yet.") + "</p>");
+            go.innerHTML = icon("trash") + esc("Delete " + plural(groupList.length, "session"));
           } else {
             box.innerHTML = h.notice(n ? "warn" : "info",
               "<p>" + (n
@@ -1344,9 +1436,9 @@
         });
         paint();
         // the core focuses the first field; start on the chosen option instead
-        if (scope === "series") {
+        if (scope !== "one") {
           setTimeout(function () {
-            var chosen = card.querySelector("#schScope-series");
+            var chosen = card.querySelector("#schScope-" + scope);
             if (chosen && Admin.modalOpen()) chosen.focus();
           }, 0);
         }
@@ -1363,7 +1455,9 @@
             by: Admin.by(), scope: s, reason: card.querySelector("#schDelReason").value.trim()
           });
           var msg = res.ok
-            ? (s === "series" ? "Weekly class deleted from " + date + " onwards" : "Class deleted for " + date) +
+            ? (s === "series" ? "Weekly class deleted from " + date + " onwards"
+              : s === "group" ? "Deleted " + plural(res.sessions || 0, "session") + " of " + occ.groupName + " from " + date
+              : "Class deleted for " + date) +
               (res.refunded ? " — " + plural(res.refunded, "student") + " refunded and notified." : ".")
             : null;
           if (!Admin.check(res, msg)) { formErr(card, res.error); return; }
@@ -1666,6 +1760,34 @@
     return "Up to " + p.maxSize + " students";
   }
 
+  // "Several dates (camp)"
+  var MAX_RANGES = 6;
+  var MAX_SESSIONS = 60;          // HC.db.addOneOffs adds at most 60 at once
+  var RANGE_DAYS = 93;            // … and reads at most 93 days per range
+  var WEEKDAYS_DEFAULT = [0, 1, 2, 3, 4];
+  var SUB_ONE = "Runs on one date only — it won’t repeat weekly. Parents can book classes up to four weeks ahead.";
+  var SUB_MANY = "Sessions on several dates under one name — like a holiday boot camp. They don’t repeat weekly.";
+
+  // "Mon 5" — a day inside a range whose label already names the month
+  function shortDay(iso) { return HC.dayShort[db.dayIndex(iso)] + " " + (+iso.slice(8, 10)); }
+
+  function rangeLabel(r) {
+    return r.to && r.to > r.from ? fmt.date(r.from, "day") + " – " + fmt.date(r.to, "day") : fmt.date(r.from);
+  }
+
+  // a session that would start in the past (today: once its start time has gone)
+  function sessionPassed(date, time) {
+    var t = today();
+    return date < t || (date === t && /^\d{2}:\d{2}$/.test(time) && db.toMinutes(time) <= nowMin());
+  }
+
+  // "Mon 14 Sep, Tue 15 Sep and 3 more"
+  function dateList(list, max) {
+    max = max || 3;
+    var shown = list.slice(0, max).map(function (d) { return fmt.date(d); }).join(", ");
+    return shown + (list.length > max ? " and " + (list.length - max) + " more" : "");
+  }
+
   Admin.addOneOff = function (prefill) {
     prefill = prefill || {};
     if (!Admin.staff) return;
@@ -1688,13 +1810,46 @@
     var time = /^\d{2}:\d{2}$/.test(prefill.time || "") ? prefill.time : suggestTime(date);
     var focusBack = rememberFocus();
 
+    var dayChips = HC.dayShort.map(function (d, i) {
+      var on = WEEKDAYS_DEFAULT.indexOf(i) >= 0;
+      return '<button type="button" class="sch-wday" id="schOoDay-' + i + '" data-wd="' + i + '" aria-pressed="' + on + '"' +
+        ' aria-label="' + esc(HC.dayNames[i]) + '" disabled>' + esc(d) + "</button>";
+    }).join("");
+
     Admin.openModal({
       title: "Add a one-off class",
-      sub: esc("Runs on one date only — it won’t repeat weekly. Parents can book classes up to four weeks ahead."),
+      sub: esc(SUB_ONE),
       body:
-        '<form class="sch-form" id="schOoForm" novalidate>' +
-          '<div class="field-row">' +
+        '<form class="sch-form sch-oo" id="schOoForm" novalidate data-mode="one">' +
+          '<div class="sch-oo__mode">' +
+            '<div class="seg" role="group" aria-label="How many dates?">' +
+              '<button type="button" id="schOoModeOne" data-oo-mode="one" aria-pressed="true">One date</button>' +
+              '<button type="button" id="schOoModeMany" data-oo-mode="many" aria-pressed="false">Several dates (camp)</button>' +
+            "</div>" +
+          "</div>" +
+          '<div class="sch-many" id="schOoMany" hidden>' +
             '<div class="field">' +
+              '<label for="schOoName">Name <span class="field__opt">(parents see this)</span></label>' +
+              '<input type="text" id="schOoName" maxlength="60" autocomplete="off" placeholder="e.g. June Boot Camp"' +
+                ' aria-describedby="schOoNameErr" disabled />' +
+              errSlot("schOoName") +
+            "</div>" +
+            '<fieldset class="sch-fieldset sch-fieldset--gap">' +
+              '<legend class="field__label">Dates</legend>' +
+              '<div class="sch-ranges" id="schOoRanges"></div>' +
+              '<button type="button" class="btn btn--quiet btn--sm sch-addrange" id="schOoAddRange" disabled>' +
+                icon("plus") + "Add another date range</button>" +
+              errSlot("schOoRanges") +
+            "</fieldset>" +
+            '<fieldset class="sch-fieldset sch-fieldset--gap">' +
+              '<legend class="field__label">On these days</legend>' +
+              '<div class="sch-wdays" id="schOoDays" role="group" aria-label="Days of the week" aria-describedby="schOoDaysErr">' +
+                dayChips + "</div>" +
+              errSlot("schOoDays") +
+            "</fieldset>" +
+          "</div>" +
+          '<div class="field-row sch-oo__when">' +
+            '<div class="field" id="schOoDateField">' +
               '<label for="schOoDate">Date</label>' +
               '<input type="date" id="schOoDate" min="' + t + '" value="' + date + '" required aria-describedby="schOoDateErr" />' +
               errSlot("schOoDate") +
@@ -1732,8 +1887,8 @@
           '<div class="field">' +
             '<label for="schOoNote">Note for parents <span class="field__opt">(optional)</span></label>' +
             '<input type="text" id="schOoNote" maxlength="120" autocomplete="off" placeholder="e.g. Extra competition prep"' +
-              (prefill.note ? ' value="' + esc(prefill.note) + '"' : "") + " />" +
-            '<p class="field__hint">Shown with the class when parents book.</p>' +
+              (prefill.note ? ' value="' + esc(prefill.note) + '"' : "") + ' aria-describedby="schOoNoteHint" />' +
+            '<p class="field__hint" id="schOoNoteHint">Shown with the class when parents book.</p>' +
           "</div>" +
           '<div class="sch-check" id="schOoCheck" aria-live="polite"></div>' +
           '<p class="field-error form-error sch-form-error" role="alert"></p>' +
@@ -1752,7 +1907,20 @@
         var coachEl = card.querySelector("#schOoCoach");
         var noteEl = card.querySelector("#schOoNote");
         var box = card.querySelector("#schOoCheck");
+        var go = card.querySelector("#schOoGo");
+        var subEl = card.querySelector(".modal__sub");
+        var manyEl = card.querySelector("#schOoMany");
+        var dateField = card.querySelector("#schOoDateField");
+        var nameEl = card.querySelector("#schOoName");
+        var rangesEl = card.querySelector("#schOoRanges");
+        var addRangeEl = card.querySelector("#schOoAddRange");
+        var daysEl = card.querySelector("#schOoDays");
         var FIELDS = ["schOoDate", "schOoTime", "schOoProg", "schOoDur", "schOoCap", "schOoCoach"];
+
+        var mode = "one";
+        var rid = 1;
+        var ranges = [{ id: 1, from: date, to: db.addDays(date, 4) }];
+        var wdays = WEEKDAYS_DEFAULT.slice();
 
         function read() {
           return {
@@ -1762,11 +1930,13 @@
             duration: +durEl.value,
             capacity: String(capEl.value).trim(),
             coach: coachEl.value,
-            note: noteEl.value.trim()
+            note: noteEl.value.trim(),
+            name: nameEl.value.trim()
           };
         }
 
-        function paint() {
+        /* ---------- one date (as before) ---------- */
+        function paintOne() {
           var d = read();
           var out = [];
           if (isIso(d.date) && /^\d{2}:\d{2}$/.test(d.time)) {
@@ -1804,7 +1974,245 @@
           box.innerHTML = out.join("");
         }
 
+        /* ---------- several dates ---------- */
+        // Every date the ranges + days give, each under the first range that holds it.
+        function plan() {
+          var d = read();
+          var seen = {};
+          var groups = [];
+          var all = [];
+          ranges.forEach(function (r) {
+            var dates = [];
+            if (wdays.length && isIso(r.from) && (!r.to || (isIso(r.to) && r.to >= r.from))) {
+              dates = db.datesFromRanges([{ from: r.from, to: r.to || r.from }], wdays).filter(function (x) {
+                if (seen[x]) return false;
+                seen[x] = 1;
+                return true;
+              });
+            }
+            groups.push({ range: r, dates: dates });
+            all = all.concat(dates);
+          });
+          all.sort();
+          return {
+            groups: groups,
+            all: all,
+            past: all.filter(function (x) { return sessionPassed(x, d.time); }),
+            valid: all.filter(function (x) { return !sessionPassed(x, d.time); })
+          };
+        }
+
+        function paintMany() {
+          var d = read();
+          var p = plan();
+          var out = [];
+          if (!p.all.length) {
+            box.innerHTML = h.notice("info", "<p>" + (wdays.length
+              ? "None of these dates fall on the days you picked."
+              : "Pick at least one day of the week.") + "</p>");
+            return;
+          }
+          var start = db.toMinutes(d.time);
+          var end = start + d.duration;
+          var pastSet = {}, leaveSet = {}, clashMap = {};
+          p.past.forEach(function (x) { pastSet[x] = 1; });
+          var clashDates = [], leaveDates = [];
+          p.valid.slice(0, 120).forEach(function (x) {
+            if (db.leaveFor(d.coach, x)) { leaveSet[x] = 1; leaveDates.push(x); }
+            var cl = openClashes(x, d.time, d.duration, d.coach);
+            if (cl.length) { clashMap[x] = cl; clashDates.push(x); }
+          });
+
+          var chips = function (x) {
+            var cls = "sch-camp__d", title = fmt.date(x, "full");
+            if (pastSet[x]) { cls += " is-past"; title += " — already passed, skipped"; }
+            else if (leaveSet[x]) { cls += " is-warn"; title += " — " + d.coach + " is on leave"; }
+            else if (clashMap[x]) { cls += " is-warn"; title += " — clashes with " + clashMap[x].map(function (o) { return o.name; }).join(", "); }
+            return '<span class="' + cls + '" title="' + esc(title) + '">' + esc(shortDay(x)) + "</span>";
+          };
+
+          var first = p.valid[0], last = p.valid[p.valid.length - 1];
+          out.push('<div class="sch-camp">' +
+            '<p class="sch-camp__sum">' + icon("calendar") + "<span><strong>" +
+              (p.valid.length ? "Creates " + esc(plural(p.valid.length, "session")) : "No sessions to create") + "</strong>" +
+              (p.valid.length ? " · " + nw(fmt.date(first)) + (last !== first ? " – " + nw(fmt.date(last)) : "") : "") +
+            "</span></p>" +
+            '<p class="sch-camp__meta">' + nw(fmt.time(d.time) + " – " + fmt.time(db.fromMinutes(end))) + " · " + nw(d.coach) + "</p>" +
+            '<ul class="sch-camp__list">' + p.groups.map(function (g) {
+              if (!g.dates.length) return "";
+              return "<li>" +
+                  '<span class="sch-camp__range">' + esc(rangeLabel(g.range)) + " · " + esc(plural(g.dates.length, "day")) + "</span>" +
+                  '<span class="sch-camp__dates">' + g.dates.map(chips).join("") + "</span>" +
+                "</li>";
+            }).join("") + "</ul>" +
+          "</div>");
+
+          if (p.valid.length > MAX_SESSIONS) {
+            out.push(h.notice("warn", "<p><strong>That’s " + p.valid.length + " sessions</strong> — you can add up to " + MAX_SESSIONS +
+              " at a time. Shorten the dates or pick fewer days.</p>"));
+          }
+          if (end > CLOSING) {
+            out.push(h.notice("warn", "<p><strong>Runs past 10:00 PM.</strong> Classes must finish by closing time — choose an earlier start or a shorter class.</p>"));
+          }
+          if (p.past.length) {
+            out.push(h.notice("warn", "<p><strong>" + esc(plural(p.past.length, "date has", "dates have")) + " already passed</strong> — " +
+              (p.past.length === 1 ? "it" : "they") + " will be skipped: " + esc(dateList(p.past)) + ".</p>"));
+          }
+          if (leaveDates.length) {
+            out.push(h.notice("warn", "<p><strong>" + esc(d.coach) + " is on leave on " + esc(dateList(leaveDates, 4)) + ".</strong> " +
+              (leaveDates.length === 1 ? "That session stays" : "Those sessions stay") + " closed until the leave is cancelled.</p>"));
+          }
+          if (clashDates.length) {
+            var shown = clashDates.slice(0, 5);
+            out.push(h.notice("warn", "<p><strong>Clashes with " + esc(d.coach) + "’s classes on " +
+              esc(plural(clashDates.length, "date")) + ":</strong></p>" +
+              '<ul class="sch-camp__clashes">' + shown.map(function (x) {
+                return "<li>" + nw(fmt.date(x)) + " — " + clashList(clashMap[x]) + "</li>";
+              }).join("") +
+              (clashDates.length > shown.length ? "<li>and " + (clashDates.length - shown.length) + " more</li>" : "") + "</ul>"));
+          }
+          var later = p.valid.filter(function (x) { return bookableFrom(x) > today(); });
+          if (later.length) {
+            out.push(h.notice("info", "<p>" + (later.length === p.valid.length
+              ? "<strong>Parents can book from " + esc(fmt.date(bookableFrom(first))) + ".</strong> "
+              : "Sessions from " + esc(fmt.date(later[0])) + " open for booking later. ") +
+              "The parent portal opens bookings four weeks ahead.</p>"));
+          }
+          box.innerHTML = out.join("");
+        }
+
+        function paint() {
+          if (mode === "many") paintMany(); else paintOne();
+          var label = "Add class";
+          if (mode === "many") {
+            var n = plan().valid.length;
+            label = n >= 1 && n <= MAX_SESSIONS ? "Add " + plural(n, "session") : "Add sessions";
+          }
+          go.innerHTML = icon("plus") + esc(label);
+        }
+
+        function paintRanges(focusId) {
+          var off = mode !== "many" ? " disabled" : "";
+          rangesEl.innerHTML = ranges.map(function (r, i) {
+            var many = ranges.length > 1;
+            var sr = many ? '<span class="sr-only">Date range ' + (i + 1) + ": </span>" : "";
+            return '<div class="sch-range" data-range="' + r.id + '">' +
+                '<div class="field">' +
+                  '<label for="schOoFrom-' + r.id + '">' + sr + "From</label>" +
+                  '<input type="date" id="schOoFrom-' + r.id + '" data-range-from="' + r.id + '" min="' + t + '" value="' + esc(r.from) + '"' + off + " />" +
+                "</div>" +
+                '<div class="field">' +
+                  '<label for="schOoTo-' + r.id + '">' + sr + "To</label>" +
+                  '<input type="date" id="schOoTo-' + r.id + '" data-range-to="' + r.id + '" min="' + t + '" value="' + esc(r.to) + '"' + off + " />" +
+                "</div>" +
+                (many
+                  ? '<button type="button" class="btn btn--icon btn--ghost btn--sm sch-range__x" data-range-remove="' + r.id +
+                      '" aria-label="Remove date range ' + (i + 1) + '" title="Remove"' + off + ">" + icon("x") + "</button>"
+                  : "") +
+              "</div>";
+          }).join("");
+          addRangeEl.hidden = ranges.length >= MAX_RANGES;
+          if (focusId) focusById(focusId);
+        }
+
+        function rangeById(id) {
+          for (var i = 0; i < ranges.length; i++) if (String(ranges[i].id) === String(id)) return ranges[i];
+          return null;
+        }
+
+        function clearRangeErr() {
+          rangesEl.querySelectorAll(".invalid").forEach(function (x) {
+            x.classList.remove("invalid");
+            x.removeAttribute("aria-invalid");
+          });
+          card.querySelector("#schOoRangesErr").textContent = "";
+        }
+
+        function onRangeEdit(e) {
+          var el = e.target;
+          var r = rangeById(el.getAttribute("data-range-from") || el.getAttribute("data-range-to"));
+          if (!r) return;
+          if (el.hasAttribute("data-range-from")) {
+            r.from = el.value;
+            // keep the range the right way round while its start moves
+            if (isIso(r.from) && isIso(r.to) && r.to < r.from) {
+              r.to = r.from;
+              var toEl = card.querySelector("#schOoTo-" + r.id);
+              if (toEl) toEl.value = r.to;
+            }
+          } else {
+            r.to = el.value;
+          }
+          clearRangeErr();
+          formErr(card, "");
+          paint();
+        }
+
+        function setMode(m) {
+          mode = m === "many" ? "many" : "one";
+          form.setAttribute("data-mode", mode);
+          card.querySelectorAll("[data-oo-mode]").forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.getAttribute("data-oo-mode") === mode));
+          });
+          manyEl.hidden = mode !== "many";
+          dateField.hidden = mode === "many";
+          // hidden fields are disabled too, so nothing out of sight takes focus or is sent
+          manyEl.querySelectorAll("input, button").forEach(function (x) { x.disabled = mode !== "many"; });
+          dateEl.disabled = mode === "many";
+          if (subEl) subEl.innerHTML = esc(mode === "many" ? SUB_MANY : SUB_ONE);
+          card.querySelector("#schOoNoteHint").textContent = mode === "many"
+            ? "Shown with every session. Leave it empty to show the name."
+            : "Shown with the class when parents book.";
+          FIELDS.concat(["schOoName", "schOoDays"]).forEach(function (id) { setErr(card, id, ""); });
+          clearRangeErr();
+          formErr(card, "");
+          paint();
+        }
+
         function clear(id) { setErr(card, id, ""); formErr(card, ""); }
+
+        card.querySelectorAll("[data-oo-mode]").forEach(function (b) {
+          b.addEventListener("click", function () { setMode(b.getAttribute("data-oo-mode")); });
+        });
+        nameEl.addEventListener("input", function () { clear("schOoName"); });
+        rangesEl.addEventListener("input", onRangeEdit);
+        rangesEl.addEventListener("change", onRangeEdit);
+        rangesEl.addEventListener("click", function (e) {
+          var x = e.target.closest("[data-range-remove]");
+          if (!x) return;
+          var id = x.getAttribute("data-range-remove");
+          var at = -1;
+          ranges.forEach(function (r, i) { if (String(r.id) === id) at = i; });
+          if (at < 0 || ranges.length < 2) return;
+          ranges.splice(at, 1);
+          clearRangeErr();
+          paintRanges("schOoFrom-" + ranges[Math.max(0, at - 1)].id);
+          paint();
+        });
+        addRangeEl.addEventListener("click", function () {
+          if (ranges.length >= MAX_RANGES) return;
+          var last = ranges[ranges.length - 1];
+          var base = isIso(last.from) ? last.from : date;
+          // a good guess: the same days one week after the last range
+          var next = { id: ++rid, from: db.addDays(base, 7), to: isIso(last.to) ? db.addDays(last.to, 7) : "" };
+          ranges.push(next);
+          clearRangeErr();
+          paintRanges("schOoFrom-" + next.id);
+          if (ranges.length >= MAX_RANGES) focusById("schOoFrom-" + next.id);
+          paint();
+        });
+        daysEl.addEventListener("click", function (e) {
+          var b = e.target.closest("[data-wd]");
+          if (!b) return;
+          var i = +b.getAttribute("data-wd");
+          var at = wdays.indexOf(i);
+          if (at >= 0) wdays.splice(at, 1); else wdays.push(i);
+          wdays.sort();
+          b.setAttribute("aria-pressed", String(at < 0));
+          clear("schOoDays");
+          clearRangeErr();
+          paint();
+        });
 
         dateEl.addEventListener("input", function () { clear("schOoDate"); clear("schOoTime"); paint(); });
         dateEl.addEventListener("change", paint);
@@ -1825,11 +2233,106 @@
           clear("schOoDur");
           paint();
         });
-        paint();
+        paintRanges();
+        if (prefill.groupName) nameEl.value = String(prefill.groupName);
+        if (prefill.mode === "many") setMode("many");
+        else paint();
 
-        form.addEventListener("submit", function (e) {
-          e.preventDefault();
-          if (!Admin.can("oneoff")) { formErr(card, "One-off classes are added by the studio admin."); return; }
+        // the fields both modes share
+        function commonErrors(d, p, errs) {
+          if (!/^\d{2}:\d{2}$/.test(d.time)) errs.schOoTime = "Choose a start time.";
+          else if (db.toMinutes(d.time) + d.duration > CLOSING) {
+            errs.schOoDur = "Ends at " + fmt.time(db.fromMinutes(db.toMinutes(d.time) + d.duration)) + " — classes must finish by 10:00 PM.";
+          }
+          if (!p) errs.schOoProg = "Choose a programme.";
+          else if (!/^\d+$/.test(d.capacity) || +d.capacity < 1 || +d.capacity > p.maxSize) {
+            errs.schOoCap = "Enter a number from 1 to " + p.maxSize + ".";
+          }
+          if (!isActiveCoach(d.coach)) errs.schOoCoach = "Choose a coach.";
+        }
+
+        function showErrors(errs, order) {
+          var firstBad = null;
+          order.forEach(function (id) {
+            setErr(card, id, errs[id] || "");
+            if (errs[id] && !firstBad) firstBad = id;
+          });
+          return firstBad;
+        }
+
+        // show the new classes where they live
+        function jumpTo(iso, coachName) {
+          if (Admin.currentView() !== "schedule") return;
+          var shown = readParams(Admin.params()).coach;
+          var patch = { week: db.weekStart(iso) };
+          if (shown !== "all" && shown !== coachName) patch.coach = "";
+          Admin.setParams(patch);
+        }
+
+        function submitMany() {
+          var d = read();
+          var p = HC.getProgramme(d.programmeId);
+          var errs = {};
+          var badRange = null;
+          if (!d.name) errs.schOoName = "Give the sessions a name, e.g. June Boot Camp.";
+          ranges.forEach(function (r) {
+            if (badRange) return;
+            if (!isIso(r.from)) badRange = { id: "schOoFrom-" + r.id, msg: "Choose a start date for each date range." };
+            else if (r.to && !isIso(r.to)) badRange = { id: "schOoTo-" + r.id, msg: "Choose an end date, or leave it empty for one day." };
+            else if (r.to && r.to < r.from) badRange = { id: "schOoTo-" + r.id, msg: "A date range can’t end before it starts." };
+            else if (r.to && db.daysBetween(r.from, r.to) >= RANGE_DAYS) {
+              badRange = { id: "schOoTo-" + r.id, msg: "Keep each date range under 13 weeks." };
+            }
+          });
+          if (!wdays.length) errs.schOoDays = "Pick at least one day.";
+          var pl = plan();
+          if (!badRange && wdays.length) {
+            var focusFirst = "schOoFrom-" + ranges[0].id;
+            if (!pl.all.length) badRange = { id: focusFirst, msg: "None of these dates fall on the days you picked." };
+            else if (!pl.valid.length) badRange = { id: focusFirst, msg: "All of these dates have passed — choose later dates." };
+            else if (pl.valid.length > MAX_SESSIONS) {
+              badRange = { id: focusFirst, msg: "That’s " + pl.valid.length + " sessions — add at most " + MAX_SESSIONS + " at a time." };
+            }
+          }
+          commonErrors(d, p, errs);
+
+          clearRangeErr();
+          if (badRange) {
+            var bad = card.querySelector("#" + badRange.id);
+            if (bad) { bad.classList.add("invalid"); bad.setAttribute("aria-invalid", "true"); }
+            card.querySelector("#schOoRangesErr").textContent = badRange.msg;
+          }
+          var firstBad = showErrors(errs, ["schOoName", "schOoDays", "schOoTime", "schOoProg", "schOoDur", "schOoCap", "schOoCoach"]);
+          if (firstBad || badRange) {
+            formErr(card, "");
+            if (errs.schOoName) focusById("schOoName");
+            else if (badRange) focusById(badRange.id);
+            else if (firstBad === "schOoDays") focusById("schOoDay-0");
+            else focusById(firstBad);
+            return;
+          }
+
+          var res = db.addOneOffs({
+            dates: pl.valid, time: d.time, programmeId: p.id, coach: d.coach,
+            capacity: +d.capacity, duration: d.duration, groupName: d.name, note: d.note
+          }, { by: Admin.by() });
+          var msg = null;
+          if (res.ok) {
+            var skipped = pl.past.concat((res.skipped || []).map(function (x) { return x.date; })).sort();
+            var closed = res.keys.filter(function (k) {
+              var o = db.occurrence(k);
+              return o && o.status === "blocked";
+            }).length;
+            msg = d.name + " added — " + plural(res.keys.length, "session") + "." +
+              (skipped.length ? " " + plural(skipped.length, "date was", "dates were") + " skipped (" + dateList(skipped) + ")." : "") +
+              (closed ? " " + plural(closed, "session stays", "sessions stay") + " closed while " + d.coach + " is on leave." : "");
+          }
+          if (!Admin.check(res, msg)) { formErr(card, res.error); return; }
+          Admin.closeModal();
+          jumpTo(res.keys[0].slice(0, 10), d.coach);
+        }
+
+        function submitOne() {
           var d = read();
           var p = HC.getProgramme(d.programmeId);
           var tNow = today();
@@ -1847,11 +2350,7 @@
           }
           if (!isActiveCoach(d.coach)) errs.schOoCoach = "Choose a coach.";
 
-          var firstBad = null;
-          FIELDS.forEach(function (id) {
-            setErr(card, id, errs[id] || "");
-            if (errs[id] && !firstBad) firstBad = id;
-          });
+          var firstBad = showErrors(errs, FIELDS);
           if (firstBad) {
             formErr(card, "");
             focusById(firstBad);
@@ -1873,15 +2372,14 @@
           }
           if (!Admin.check(res, msg)) { formErr(card, res.error); return; }
           Admin.closeModal();
-
-          // show the new class where it lives
-          if (Admin.currentView() === "schedule") {
-            var shown = readParams(Admin.params()).coach;
-            var patch = { week: db.weekStart(d.date) };
-            if (shown !== "all" && shown !== d.coach) patch.coach = "";
-            Admin.setParams(patch);
-          }
+          jumpTo(d.date, d.coach);
           if (Admin.openClass) Admin.openClass(res.key);
+        }
+
+        form.addEventListener("submit", function (e) {
+          e.preventDefault();
+          if (!Admin.can("oneoff")) { formErr(card, "One-off classes are added by the studio admin."); return; }
+          if (mode === "many") submitMany(); else submitOne();
         });
       }
     });

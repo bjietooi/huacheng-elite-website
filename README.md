@@ -123,7 +123,7 @@ separately from the private repo `bjietooi/huacheng-elite-admin`; after changing
 | Whole day off | Coach (own), Admin | Leave → Book leave |
 | Delete a class for **one date only** (admin can also end a weekly class) | Coach (own), Admin | ⋯ → Delete |
 | Manually add a student to a class | Coach (own), Admin | Open a class → Add student |
-| Add a one-off class on a specific date | Admin | Schedule → Add one-off class |
+| Add a one-off class on a specific date — or a camp across several date ranges | Admin | Schedule → Add one-off class |
 | Add / edit coaches, logins, hand weekly classes to another coach | Admin | Coaches |
 | Manual credit deduction (or top-up), per child | Admin | Credits, or Students → Deduct / Add |
 | Every student with credits, attendance and status (dormant, low, negative) | Admin | Students |
