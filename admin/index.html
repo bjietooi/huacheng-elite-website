@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Staff log in · Huacheng Elite</title>
+  <meta name="description" content="Huacheng Elite (华承精锐) coach and admin console — class rosters, attendance, leave and credits. UX concept demo." />
+  <meta name="theme-color" content="#1c211e" />
+  <meta name="robots" content="noindex, nofollow" />
+
+  <link rel="icon" href="../images/favicon-32.png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="../images/apple-touch-icon.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body class="login-page">
+  <div class="login">
+    <div class="login__seal" aria-hidden="true"></div>
+
+    <main class="login__main">
+      <div class="login__card">
+        <div class="login__brand">
+          <span class="brand__mark" aria-hidden="true"></span>
+          <span class="brand__text">
+            <span class="brand__name">Huacheng Elite</span>
+            <span class="brand__cn">华承精锐</span>
+          </span>
+        </div>
+        <p class="login__eyebrow">Staff console</p>
+        <h1 class="login__title">Coach &amp; admin log in</h1>
+        <p class="login__sub">Rosters, attendance, leave and credits — in one place.</p>
+
+        <form id="staffLogin" class="login__form" novalidate>
+          <div class="field">
+            <label for="staffEmail">Work email</label>
+            <input id="staffEmail" type="email" autocomplete="username" placeholder="coach.a@huachengelite.com" />
+          </div>
+          <div class="field">
+            <label for="staffPass">Password</label>
+            <input id="staffPass" type="password" autocomplete="current-password" placeholder="••••••••" />
+          </div>
+          <p class="field-error" id="loginError" role="alert"></p>
+          <button class="btn btn--primary btn--block" type="submit">Log in <span aria-hidden="true">→</span></button>
+        </form>
+
+        <div class="login__divider"><span>or try a demo login</span></div>
+
+        <div class="login__demos" id="demoLogins"></div>
+
+        <p class="login__note">
+          UX concept — no real accounts and nothing is sent anywhere.
+        </p>
+      </div>
+    </main>
+
+    <footer class="login__foot">
+      © <span id="year">2026</span> Huacheng Elite · 华承精锐 · Staff use only
+    </footer>
+  </div>
+
+  <script src="../mock-data.js"></script>
+  <script src="../hc-store.js"></script>
+  <script>
+    (function () {
+      "use strict";
+      var db = window.HC && window.HC.db;
+      document.getElementById("year").textContent = new Date().getFullYear();
+      if (!db) return;
+
+      // already signed in → straight to the console
+      if (db.currentStaff()) {
+        location.replace("app.html");
+        return;
+      }
+
+      function signIn(id) {
+        db.session.set("staff", id);
+        location.href = "app.html";
+      }
+
+      function esc(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      }
+
+      var blurbs = {
+        admin: "Whole studio — coaches, credits and reports",
+        coach: "Own classes: attendance, remarks, leave"
+      };
+      document.getElementById("demoLogins").innerHTML = db.staff({ canLogin: true }).map(function (s) {
+        var ini = s.name.split(" ").map(function (p) { return p[0]; }).join("").slice(0, 2).toUpperCase();
+        return '<button type="button" class="demo" data-staff="' + esc(s.id) + '">' +
+            '<span class="avatar" aria-hidden="true">' + esc(ini) + "</span>" +
+            '<span class="demo__text"><span class="demo__name">' + esc(s.name) +
+              ' <span class="chip chip--' + (s.role === "admin" ? "admin" : "muted") + '">' + (s.role === "admin" ? "Admin" : "Coach") + "</span></span>" +
+              '<span class="demo__desc">' + esc(blurbs[s.role]) + "</span></span>" +
+            '<span class="demo__go" aria-hidden="true">→</span>' +
+          "</button>";
+      }).join("");
+      document.querySelectorAll("[data-staff]").forEach(function (b) {
+        b.addEventListener("click", function () { signIn(b.getAttribute("data-staff")); });
+      });
+
+      // any password works; the email picks the staff member (unknown → error)
+      document.getElementById("staffLogin").addEventListener("submit", function (e) {
+        e.preventDefault();
+        var email = document.getElementById("staffEmail").value.trim().toLowerCase();
+        var err = document.getElementById("loginError");
+        var match = db.staff({ canLogin: true }).find(function (s) { return (s.email || "").toLowerCase() === email; });
+        if (!email) { err.textContent = "Enter your work email."; return; }
+        if (!match) {
+          err.textContent = "That email can’t sign in here. Ask the studio admin for access — or use a demo login below.";
+          return;
+        }
+        signIn(match.id);
+      });
+      document.getElementById("staffEmail").addEventListener("input", function () {
+        document.getElementById("loginError").textContent = "";
+      });
+    })();
+  </script>
+</body>
+</html>

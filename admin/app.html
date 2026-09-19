@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Staff console · Huacheng Elite</title>
+  <meta name="description" content="Huacheng Elite (华承精锐) coach and admin console. UX concept demo." />
+  <meta name="theme-color" content="#1c211e" />
+  <meta name="robots" content="noindex, nofollow" />
+
+  <link rel="icon" href="../images/favicon-32.png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="../images/apple-touch-icon.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="admin.css" />
+  <link rel="stylesheet" href="css/today.css" />
+  <link rel="stylesheet" href="css/schedule.css" />
+  <link rel="stylesheet" href="css/class-drawer.css" />
+  <link rel="stylesheet" href="css/leave.css" />
+  <link rel="stylesheet" href="css/students.css" />
+  <link rel="stylesheet" href="css/coaches.css" />
+  <link rel="stylesheet" href="css/credits.css" />
+  <link rel="stylesheet" href="css/reports.css" />
+</head>
+<body class="console-page">
+  <a class="skip" href="#page">Skip to content</a>
+
+  <div class="console">
+    <!-- ===== Sidebar (bottom bar on phones) ===== -->
+    <aside class="side" aria-label="Staff console">
+      <div class="side__brand">
+        <span class="brand__mark" aria-hidden="true"></span>
+        <span class="brand__text">
+          <span class="brand__name">Huacheng Elite</span>
+          <span class="side__role" id="roleTag">Staff console</span>
+        </span>
+      </div>
+      <nav class="side__nav" id="sideNav" aria-label="Sections"></nav>
+      <div class="side__spacer"></div>
+      <div class="me" id="me"></div>
+    </aside>
+
+    <!-- ===== Page ===== -->
+    <main class="page" id="page" tabindex="-1"></main>
+  </div>
+
+  <!-- ===== Drawer (class detail / student profile) ===== -->
+  <div class="drawer-scrim" id="drawerScrim" aria-hidden="true"></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="false" aria-labelledby="drawerTitle" aria-hidden="true">
+    <header class="drawer__head">
+      <div class="drawer__heading">
+        <h2 class="drawer__title" id="drawerTitle"></h2>
+        <div class="drawer__sub"></div>
+      </div>
+      <button class="drawer__close btn btn--icon btn--ghost" type="button" aria-label="Close panel">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div class="drawer__body"></div>
+  </aside>
+
+  <!-- ===== Modal ===== -->
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
+    <div class="modal__scrim"></div>
+    <div class="modal__card" id="modalCard" role="document"></div>
+  </div>
+
+  <!-- ===== Toasts ===== -->
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+  <script src="../mock-data.js"></script>
+  <script src="../hc-store.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/today.js"></script>
+  <script src="js/schedule.js"></script>
+  <script src="js/class-drawer.js"></script>
+  <script src="js/leave.js"></script>
+  <script src="js/students.js"></script>
+  <script src="js/coaches.js"></script>
+  <script src="js/credits.js"></script>
+  <script src="js/reports.js"></script>
+</body>
+</html>

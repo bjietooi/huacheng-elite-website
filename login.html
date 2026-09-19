@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#edeae1" />
   <meta name="robots" content="noindex" />
 
-  <!-- Favicon (inline hexagon mark — matches the main site) -->
+  <!-- Favicon (client seal mark PNGs — same files as the main site) -->
   <link rel="icon" href="images/favicon-32.png" sizes="32x32" />
   <link rel="apple-touch-icon" href="images/apple-touch-icon.png" />
 
@@ -43,13 +43,13 @@
           </a>
           <p class="auth__eyebrow"><span aria-hidden="true">◆</span> Booking Portal</p>
           <h1 class="auth__title">Welcome back</h1>
-          <p class="auth__sub">Manage your child’s classes and credits.</p>
+          <p class="auth__sub">Book classes for your children and keep track of credits.</p>
         </div>
 
         <!-- tabs -->
         <div class="tabs" role="tablist" aria-label="Log in or create account">
-          <button class="tabs__btn" id="tabLogin" role="tab" aria-selected="true" aria-controls="panelLogin">Log in</button>
-          <button class="tabs__btn" id="tabSignup" role="tab" aria-selected="false" aria-controls="panelSignup">Create account</button>
+          <button class="tabs__btn" type="button" id="tabLogin" role="tab" aria-selected="true" aria-controls="panelLogin">Log in</button>
+          <button class="tabs__btn" type="button" id="tabSignup" role="tab" aria-selected="false" aria-controls="panelSignup">Create account</button>
         </div>
 
         <!-- LOG IN -->
@@ -57,16 +57,21 @@
           <form id="loginForm" novalidate>
             <div class="field">
               <label for="loginEmail">Email</label>
-              <input id="loginEmail" type="email" autocomplete="email" placeholder="you@example.com" />
+              <input id="loginEmail" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="loginError loginHelp" />
+              <p class="field-error" id="loginError" role="alert"></p>
             </div>
             <div class="field">
               <label for="loginPass">Password</label>
               <input id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••" />
             </div>
-            <div class="auth__row">
-              <span class="muted">Any details work in this demo.</span>
+            <div class="auth__row auth__row--end">
               <a href="#" class="auth__link" id="forgotLink">Forgot password?</a>
             </div>
+            <p class="pt-auth-help" id="loginHelp">
+              Demo: any password works. Try a sample parent such as
+              <button type="button" class="pt-fill" data-fill="marcus.lim@example.com">marcus.lim@example.com</button>
+              — any other email opens the demo family (Jane Tan).
+            </p>
             <div class="auth__hint" id="forgotHint">
               In the live portal we’d email you a reset link. This is a UX concept — just log in with any email and password.
             </div>
@@ -79,31 +84,38 @@
           <form id="signupForm" novalidate>
             <div class="field">
               <label for="suParent">Parent’s name <span aria-hidden="true">*</span></label>
-              <input id="suParent" type="text" autocomplete="name" placeholder="e.g. Jane Tan" />
+              <input id="suParent" type="text" autocomplete="name" placeholder="e.g. Jane Tan" aria-describedby="suParentError" />
+              <p class="field-error" id="suParentError" role="alert"></p>
             </div>
             <div class="field-row">
               <div class="field">
                 <label for="suEmail">Email <span aria-hidden="true">*</span></label>
-                <input id="suEmail" type="email" autocomplete="email" placeholder="you@example.com" />
+                <input id="suEmail" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="suEmailError" />
+                <p class="field-error" id="suEmailError" role="alert"></p>
               </div>
               <div class="field">
                 <label for="suPhone">Phone <span aria-hidden="true">*</span></label>
-                <input id="suPhone" type="tel" autocomplete="tel" placeholder="+65 8888 8888" />
+                <input id="suPhone" type="tel" autocomplete="tel" placeholder="+65 8888 8888" aria-describedby="suPhoneError" />
+                <p class="field-error" id="suPhoneError" role="alert"></p>
               </div>
             </div>
             <div class="field-row">
               <div class="field">
                 <label for="suChild">Child’s name <span aria-hidden="true">*</span></label>
-                <input id="suChild" type="text" placeholder="e.g. Ethan" />
+                <input id="suChild" type="text" placeholder="e.g. Ethan" aria-describedby="suChildError" />
+                <p class="field-error" id="suChildError" role="alert"></p>
               </div>
               <div class="field">
                 <label for="suAge">Child’s age <span aria-hidden="true">*</span></label>
-                <input id="suAge" type="text" inputmode="numeric" placeholder="e.g. 7" />
+                <input id="suAge" type="text" inputmode="numeric" placeholder="e.g. 7" aria-describedby="suAgeError suAgeHint" />
+                <p class="pt-field-hint" id="suAgeHint">Classes start from age 4</p>
+                <p class="field-error" id="suAgeError" role="alert"></p>
               </div>
             </div>
             <div class="field">
               <label for="suPass">Password <span aria-hidden="true">*</span></label>
-              <input id="suPass" type="password" autocomplete="new-password" placeholder="Create a password" />
+              <input id="suPass" type="password" autocomplete="new-password" placeholder="Create a password" aria-describedby="suPassError" />
+              <p class="field-error" id="suPassError" role="alert"></p>
             </div>
 
             <label class="check">
@@ -111,20 +123,24 @@
               <span>I agree to the <a href="terms.html" target="_blank" rel="noopener">Terms &amp; Conditions</a>.</span>
             </label>
             <p class="field-error" id="agreeError" role="alert"></p>
+            <p class="field-error" id="signupError" role="alert"></p>
+            <p class="pt-auth-help pt-auth-help--sub">Got more than one child? Add them from <strong>My account</strong> once you’re in — one account and one credit balance cover the whole family.</p>
 
             <button class="btn btn--primary btn--block auth__submit" type="submit">Create account &amp; start <span class="btn__arrow" aria-hidden="true">→</span></button>
-            <p class="muted" style="text-align:center;margin-top:.7rem;">New accounts get <strong style="color:var(--copper);">1 free trial credit</strong> ◆</p>
+            <p class="muted" style="text-align:center;margin-top:.7rem;">New families get <strong style="color:var(--copper);">1 free trial credit</strong> ◆ for their first class</p>
           </form>
         </section>
 
         <!-- demo shortcut -->
         <div class="auth__divider">or</div>
-        <button class="btn btn--ghost btn--block auth__demo" id="demoBtn">
+        <button class="btn btn--ghost btn--block auth__demo" type="button" id="demoBtn">
           Continue with demo account
         </button>
+        <p class="pt-auth-demo">Jane Tan · parent of Ethan &amp; Chloe</p>
 
         <p class="auth__note">
-          This is a UX concept — any details work, nothing is sent anywhere.
+          This is a UX concept — any details work and nothing is sent anywhere.
+          Demo data is shared with the coach &amp; admin console on this device.
         </p>
       </div>
     </main>
@@ -135,6 +151,7 @@
   </div>
 
   <script src="mock-data.js"></script>
+  <script src="hc-store.js"></script>
   <script src="app.js"></script>
   <script>document.getElementById("year").textContent = new Date().getFullYear();</script>
 </body>

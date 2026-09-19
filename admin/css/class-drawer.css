@@ -1,0 +1,256 @@
+/* ============================================================
+   Class drawer (admin/js/class-drawer.js) — prefix: cd-
+   Builds on the shared drawer, notice, chip, .att and .choice
+   components in admin.css; only layout specific to the class
+   detail lives here.
+   ============================================================ */
+
+/* ---------- header ---------- */
+.cd-head__sep { color: var(--ink-faint); }
+.cd-head__coach { display: inline-flex; align-items: center; gap: .3rem; }
+.cd-head__coach .ic { width: 15px; height: 15px; color: var(--ink-faint); }
+
+/* ---------- status notices ---------- */
+.cd-status .notice { margin-top: 0; }
+.cd-status .notice + .notice { margin-top: .6rem; }
+.cd-status .notice > div { min-width: 0; flex: 1; }
+.cd-reason {
+  margin-top: .3rem; color: var(--ink-soft); font-style: italic;
+  overflow-wrap: anywhere; white-space: pre-line;
+}
+.cd-meta { margin-top: .25rem; font-size: .78rem; color: var(--ink-faint); }
+.cd-notice__actions { margin-top: .55rem; }
+
+/* ---------- summary: class state + attendance + numbers ---------- */
+.cd-state {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: .5rem 1rem; margin-bottom: .6rem; padding: .7rem .9rem;
+  background: var(--paper); border: 1px solid var(--line); border-left-width: 4px;
+  border-radius: var(--radius);
+}
+.cd-state--upcoming { border-left-color: var(--copper); }
+.cd-state--now { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok-wash) 55%, var(--paper)); }
+.cd-state--passed { border-left-color: var(--line-strong, #cfc6b6); }
+.cd-state--todo { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn-wash) 55%, var(--paper)); }
+.cd-state__main { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; min-width: 0; }
+.cd-state__main .chip { font-size: .78rem; padding: .2rem .65rem; }
+.cd-state__when { font-size: .9rem; font-weight: 600; color: var(--ink); }
+.cd-state__att {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  gap: .15rem .5rem; margin-left: auto; text-align: right;
+}
+.cd-state__k { font-size: .68rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
+.cd-state__att .att-badge { font-size: .9rem; }
+.cd-state__att .att-badge .ic { width: 16px; height: 16px; }
+.cd-state__d { flex-basis: 100%; font-size: .74rem; color: var(--ink-soft); }
+.cd-state__none { font-size: .82rem; color: var(--ink-faint); }
+
+.cd-sums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6rem; }
+.cd-sum {
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .7rem .85rem; min-width: 0;
+}
+.cd-sum__k { font-size: .68rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
+.cd-sum__v { margin-top: .15rem; font-size: .88rem; color: var(--ink-soft); line-height: 1.2; }
+.cd-sum__v strong { font-family: var(--serif); font-size: 1.7rem; font-weight: 700; color: var(--ink); line-height: 1; }
+.cd-sum__v small { font-size: .85rem; color: var(--ink-faint); margin-left: .25rem; }
+.cd-sum__v .cd-sum__cred .cred { font-family: var(--serif); font-size: 1.7rem; }
+/* Cormorant's old-style figures read "11" as "II" — force lining figures */
+.cd-sum__v strong, .cd-sum__v .cd-sum__cred .cred, .cd-state, .cd-bal .cred, .cd-pick__bal .cred {
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.cd-sum__d { display: block; margin-top: .3rem; font-size: .74rem; color: var(--ink-faint); }
+.cd-sum__d--warn { color: var(--warn); font-weight: 600; }
+
+.cd-fill {
+  display: block; height: 6px; margin-top: .5rem; border-radius: 100px; overflow: hidden;
+  background: var(--cream-deep);
+}
+.cd-fill__bar { display: block; height: 100%; border-radius: inherit; background: var(--copper); transition: width .3s var(--ease); }
+.cd-fill.is-full .cd-fill__bar { background: var(--warn); }
+
+/* ---------- actions & hints ---------- */
+.cd-actions { gap: .45rem; }
+.cd-hint {
+  display: flex; align-items: flex-start; gap: .4rem;
+  font-size: .8rem; color: var(--ink-soft); line-height: 1.4;
+}
+.cd-hint .ic { width: 15px; height: 15px; margin-top: .1rem; color: var(--copper-deep); }
+.cd-actions + .cd-hint { margin-top: .55rem; }
+
+/* ---------- students ---------- */
+.cd-students .drawer__section-title { justify-content: flex-start; gap: .35rem; }
+.cd-count { font-weight: 600; letter-spacing: .04em; color: var(--ink-faint); }
+.cd-bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: .5rem .8rem; margin-bottom: .7rem;
+}
+.cd-bar__info { min-width: 0; }
+.cd-bar__tools { margin-left: auto; justify-content: flex-end; }
+
+.cd-roster {
+  display: grid; background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden;
+}
+.cd-stu {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start;
+  gap: .3rem .75rem; padding: .8rem 1rem;
+  border-top: 1px solid var(--line);
+}
+.cd-stu:first-child { border-top: none; }
+.cd-stu__avatar { padding-top: .1rem; }
+.cd-stu__main { min-width: 0; }
+.cd-stu__name { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; line-height: 1.3; }
+.cd-stu__link {
+  font-weight: 600; color: var(--ink); text-align: left; overflow-wrap: anywhere;
+  border-radius: 4px;
+}
+.cd-stu__link:hover { color: var(--copper-deep); text-decoration: underline; text-underline-offset: 2px; }
+.cd-stu__sub, .cd-stu__meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .15rem .4rem;
+  margin-top: .2rem; font-size: .78rem; color: var(--ink-soft); line-height: 1.35;
+}
+.cd-stu__meta { color: var(--ink-faint); gap: .15rem .9rem; }
+.cd-sep { color: var(--ink-faint); }
+.cd-stu__phone { display: inline-flex; align-items: center; gap: .4rem; }
+.cd-bal { display: inline-flex; align-items: center; gap: .3rem; color: var(--ink-soft); font-weight: 600; }
+.cd-link {
+  color: var(--copper-deep); font-weight: 500; font-size: inherit;
+  text-decoration: underline; text-decoration-color: rgba(143,85,39,.3); text-underline-offset: 2px;
+  border-radius: 4px;
+}
+.cd-link:hover { text-decoration-color: currentColor; }
+
+.cd-stu__ctrl { display: flex; flex-direction: column; align-items: flex-end; gap: .35rem; }
+.cd-stu__tools { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .2rem; }
+.cd-stu__tools .btn--quiet { padding-inline: .5rem; }
+.cd-stu__tools .ic { width: 14px; height: 14px; }
+.cd-rm { color: var(--warn); padding-inline: .5rem; }
+.cd-rm:hover:not(:disabled) { background: var(--warn-wash); }
+
+/* inline remark (rating + performance notes) */
+.cd-note {
+  grid-column: 2 / -1; margin-top: .35rem;
+  padding: .55rem .75rem; border-radius: var(--radius-sm, 8px);
+  background: var(--white); border: 1px solid var(--line); border-left: 3px solid var(--copper-soft, var(--copper));
+}
+.cd-note__head { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .6rem; margin-bottom: .2rem; }
+.cd-note__label { font-size: .66rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--copper-deep); }
+.cd-note__text { font-size: .86rem; color: var(--ink); white-space: pre-line; overflow-wrap: anywhere; }
+.cd-note__meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .55rem;
+  margin-top: .35rem; font-size: .74rem; color: var(--ink-faint);
+}
+.cd-note__lock { font-style: italic; }
+
+/* cancelled bookings */
+.cd-cancelled { margin-top: .6rem; }
+.cd-cancelled > .btn .ic { width: 14px; height: 14px; }
+.cd-roster--cancelled { margin-top: .4rem; background: transparent; box-shadow: none; border-style: dashed; }
+.cd-stu.is-cancelled { padding-block: .6rem; }
+.cd-stu.is-cancelled .cd-stu__link,
+.cd-stu.is-cancelled .cd-stu__name > span:first-child { color: var(--ink-soft); font-weight: 500; }
+.cd-stu.is-cancelled .avatar { opacity: .6; }
+
+.cd-empty { padding: 1.4rem 1rem; }
+.cd-empty .empty__d { margin-bottom: 0; }
+
+/* ---------- footer ---------- */
+.cd-foot {
+  padding-top: .9rem; border-top: 1px solid var(--line);
+  font-size: .76rem; color: var(--ink-faint);
+}
+.cd-foot p + p { margin-top: .15rem; }
+
+/* ---------- modals ---------- */
+.cd-form-error:empty { display: none; }
+.cd-form-error { margin-top: .6rem; }
+.cd-modal-left { margin-right: auto; }
+.cd-confirm-check { margin-top: .8rem; }
+.cd-confirm-hint { margin-top: .4rem; }
+.cd-confirm-credit {
+  display: flex; align-items: flex-start; gap: .45rem; margin-top: .8rem;
+  padding: .55rem .7rem; border-radius: var(--radius-sm, 8px); background: var(--cream);
+  font-size: .86rem; color: var(--ink-soft);
+}
+.cd-confirm-credit .ic { width: 16px; height: 16px; margin-top: .1rem; flex: none; color: var(--copper-deep); }
+
+/* note editor */
+.cd-rate label { gap: .4rem; }
+.cd-rate .rating__dots i { width: 6px; height: 6px; }
+.cd-share { margin-top: .95rem; }
+.cd-share .field__hint { font-weight: 400; }
+
+/* add student */
+.cd-assign__cap { margin-bottom: .8rem; }
+.cd-assign__cap .notice { margin-top: .5rem; }
+.cd-assign__count { display: flex; align-items: center; gap: .4rem; font-size: .82rem; color: var(--ink-soft); }
+.cd-assign__count .ic { width: 15px; height: 15px; color: var(--copper-deep); }
+#cdAssignDone .notice { margin: 0 0 .8rem; }
+.cd-assign__label { display: block; margin-bottom: .35rem; }
+.cd-assign__results {
+  margin-top: .7rem; max-height: min(320px, 40vh); overflow-y: auto; overscroll-behavior: contain;
+  padding: 2px; border-radius: var(--radius);
+}
+.cd-assign__results.is-invalid { box-shadow: 0 0 0 2px rgba(184,69,47,.35); }
+.cd-assign__group { font-size: .7rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 .4rem; }
+.cd-assign__list { gap: .4rem; }
+.cd-assign__none { font-size: .86rem; color: var(--ink-soft); padding: .8rem .2rem; }
+.cd-assign__more { margin-top: .4rem; }
+.cd-pick { align-items: center; padding: .6rem .75rem; }
+.cd-pick input { margin-top: 0; }
+.cd-pick__body { flex: 1; min-width: 0; }
+.cd-pick .choice__t { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .45rem; }
+.cd-pick__bal {
+  flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: .05rem;
+  font-size: .9rem; line-height: 1.1;
+}
+.cd-pick__k { font-size: .62rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
+.cd-assign__charge { margin-top: .9rem; }
+.cd-assign__charge input:disabled { cursor: not-allowed; opacity: .7; }
+.cd-assign__after { display: inline-flex; align-items: center; gap: .3rem; margin-left: .2rem; white-space: nowrap; }
+.cd-assign__warn { margin-top: .7rem; }
+.cd-assign__warn .check { margin-top: .45rem; color: var(--ink); }
+.cd-assign__warn.is-invalid { box-shadow: 0 0 0 3px rgba(184,69,47,.22); }
+
+/* ---------- phones ---------- */
+@media (max-width: 760px) {
+  /* bottom-sheet modal: Cancel + Save share a row, Delete sits underneath */
+  .modal__actions .cd-modal-left { order: 3; flex-basis: 100%; margin-right: 0; }
+}
+
+@media (max-width: 560px) {
+  .cd-sums { gap: .45rem; }
+  .cd-sum { padding: .6rem .65rem; }
+  .cd-sum__v strong, .cd-sum__v .cd-sum__cred .cred { font-size: 1.45rem; }
+  .cd-state { padding: .6rem .75rem; }
+  .cd-state__att { margin-left: 0; justify-content: flex-start; text-align: left; }
+  .cd-stu { grid-template-columns: auto minmax(0, 1fr); padding: .75rem .85rem; }
+  .cd-stu__ctrl {
+    grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap;
+    align-items: center; justify-content: space-between; gap: .4rem;
+  }
+  .cd-stu__ctrl .att { flex: 1 1 auto; }
+  .cd-stu__ctrl .att button { flex: 1; min-height: 36px; }
+  /* same height as the attendance buttons on the row */
+  .cd-stu__tools .btn--xs { min-height: 36px; }
+  .cd-note { grid-column: 1 / -1; }
+  .cd-bar__tools { width: 100%; margin-left: 0; }
+  .cd-bar__tools .btn { flex: 1; }
+  .cd-actions .btn { flex: 1 1 auto; }
+
+  /* separators would dangle at the end of a wrapped line: let the gap do the work */
+  .drawer__sub .cd-head__sep { display: none; }
+  .cd-stu__sub { column-gap: .6rem; }
+  .cd-stu__sub .cd-sep { display: none; }
+  /* the phone number sits on its own line, away from the parent link */
+  .cd-stu__phone { flex-basis: 100%; }
+  /* bigger hit areas without moving the layout */
+  .cd-link { display: inline-block; padding-block: .3rem; margin-block: -.3rem; }
+  .cd-stu__link { padding-block: .2rem; margin-block: -.2rem; }
+}
+
+@media (max-width: 380px) {
+  /* keep the "Remove" label — a bare × on its own line reads as "close" */
+  .cd-rm { margin-left: auto; }
+}

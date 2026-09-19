@@ -13,6 +13,10 @@ It's a fast, dependency-free static site — just HTML, CSS and a little JavaScr
 | `index.html` | The whole page (all sections) |
 | `styles.css` | All styling, fully responsive |
 | `script.js` | Menu, scroll effects, and the WhatsApp lead form |
+| `login.html`, `portal.html`, `app.js`, `app.css` | Parent booking portal (UX concept) |
+| `admin/` | Coach & admin console (UX concept) — see below |
+| `mock-data.js` | Programmes, weekly timetable, packages, staff logins |
+| `hc-store.js` | Shared mock database used by the portal and the console |
 | `.claude/` | Local preview server (used for development only) |
 
 ---
@@ -84,6 +88,55 @@ It's static, so it hosts anywhere for free/cheap:
 - Any web host — upload the files to the web root.
 
 Remember to update the structured-data `telephone`, `email` and `address` in `index.html` too.
+
+---
+
+## 🥋 Booking portal & coach/admin console (UX concept)
+
+Two clickable prototypes that share one **mock database** (`hc-store.js`, saved in the browser's
+`localStorage`). There is **no backend yet** — nothing is sent anywhere — but both apps act on the
+same data, so a change made in the console shows up in the parent portal straight away.
+The demo data is re-created fresh each day so the walkthrough always starts from "today".
+
+**Credits belong to each child**, not the family: every child has their own balance, packages are
+bought for one child at that child's level (Junior / Elite / Competitive), and a booking uses the
+booked child's credits.
+
+**Parent portal** — `login.html` → `portal.html`
+- One account, several children: pick who's coming when booking; each child's credits shown separately.
+- Week-by-week timetable (up to 4 weeks ahead); unavailable classes can't be booked.
+- Notices when the studio cancels a class (credit refunded automatically), past classes with
+  attendance and any coach remarks shared with parents, credit history per child.
+- Demo: "Continue with demo account" (Jane Tan — Ethan & Chloe), or a sample parent email
+  such as `marcus.lim@example.com`.
+
+**Coach & admin console** — `admin/` (not linked from the public site, `noindex`). It is deployed
+separately from the private repo `bjietooi/huacheng-elite-admin`; after changing `admin/`, run
+`tools/sync-from-website.sh` in that repo's folder and push.
+
+| Need (from the client meetings) | Who | Where |
+|---|---|---|
+| See my classes with status (Upcoming / Now / Passed) and whether attendance is marked | Coach | My classes |
+| Student list per class; mark attendance | Coach, Admin | Open a class |
+| Remarks — rating & performance notes (optionally shared with the parent) | Coach | Open a class |
+| Can't attend a class → block it so it can't be booked | Coach (own), Admin | ⋯ on the class → Block class |
+| Whole day off | Coach (own), Admin | Leave → Book leave |
+| Delete a class for **one date only** (admin can also end a weekly class) | Coach (own), Admin | ⋯ → Delete |
+| Manually add a student to a class | Coach (own), Admin | Open a class → Add student |
+| Add a one-off class on a specific date | Admin | Schedule → Add one-off class |
+| Add / edit coaches, logins, hand weekly classes to another coach | Admin | Coaches |
+| Manual credit deduction (or top-up), per child | Admin | Credits, or Students → Deduct / Add |
+| Every student with credits, attendance and status (dormant, low, negative) | Admin | Students |
+| Dashboard of credits not yet utilised (+ CSV export) | Admin | Reports |
+
+- Log in at `admin/index.html` with a demo login: **Studio Admin** or **Coach A**
+  (Coach B still teaches but has no login — an admin can switch that on under Coaches).
+- A quick guide opens on first login (reopen it from the account menu).
+- **Reset demo data** (account menu) restores the sample studio for both apps.
+- Blocking, deleting or a leave day refunds booked students and notifies their parents automatically.
+
+To make it real, `hc-store.js` is the piece to replace: its `HC.db` functions map one-to-one onto the
+API a backend (or the existing WordPress booking plugin) would need to provide.
 
 ---
 

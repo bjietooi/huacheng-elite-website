@@ -1,0 +1,165 @@
+/* ============================================================
+   Today view (admin) — studio dashboard
+   Layout + a few row pieces; everything else comes from admin.css.
+   ============================================================ */
+
+.today-next { color: var(--ink-faint); white-space: nowrap; }
+
+/* ---------- stats: always 4 tiles → 4 across, or 2 × 2 ---------- */
+.today-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 1.2rem; }
+/* Cormorant defaults to old-style figures ("1" reads as "I") — use lining ones for numbers */
+.today-stats .stat__v, .today-day span { font-variant-numeric: lining-nums tabular-nums; }
+.today-stats .stat__k,
+.today-stats .stat__v,
+.today-stats .stat__d { display: block; }
+.today-stat-link {
+  display: block; width: 100%; text-align: left; color: inherit; cursor: pointer;
+  transition: border-color .2s var(--ease), box-shadow .2s var(--ease), transform .2s var(--ease);
+}
+.today-stat-link:hover { border-color: var(--copper); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+.today-stat-link.stat--ink:hover { border-color: transparent; box-shadow: var(--shadow-md); }
+.today-stat__go { font-weight: 600; color: var(--copper-deep); white-space: nowrap; }
+.stat--ink .today-stat__go { color: var(--copper-soft); }
+
+/* ---------- two-column layout ---------- */
+.today-grid {
+  display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 1rem; align-items: start;
+}
+.today-col { display: grid; gap: 1rem; min-width: 0; }
+.today-col .card + .card { margin-top: 0; }
+
+.today-card .card__head { padding-bottom: .5rem; }
+.today-card .card__head .btn .ic { width: 15px; height: 15px; }
+
+/* ---------- clickable rows (whole row is a button) ---------- */
+.today-row { color: inherit; }
+.today-row .row__main,
+.today-row .row__title,
+.today-row .row__meta { display: block; }
+.today-row .row__title {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .5rem;
+  line-height: 1.3; overflow-wrap: anywhere;
+}
+.today-row .row__meta { margin-top: .15rem; line-height: 1.5; }
+.today-row .row__meta .att-badge { vertical-align: -2px; }
+.today-row:focus-visible { outline-offset: -2px; border-radius: 0; }
+.today-row .row__aside .btn { pointer-events: none; }
+.today-row .row__aside .btn .ic { width: 14px; height: 14px; }
+.today-row:hover .row__aside .btn--ghost { border-color: var(--ink); }
+.today-row:hover .row__aside .btn--primary { background: var(--copper-deep); }
+
+/* time column */
+.today-time {
+  display: flex; flex-direction: column; flex: none; width: 4.4rem; line-height: 1.2;
+}
+.today-time strong { font-size: .9rem; font-weight: 700; white-space: nowrap; }
+.today-time span { font-size: .74rem; color: var(--ink-faint); white-space: nowrap; }
+
+/* class states: Now gets a green edge, Passed is quieter, blocked / deleted are muted */
+.today-class--now { box-shadow: inset 3px 0 0 var(--ok); background: rgba(47, 125, 82, .04); }
+.today-class--passed .row__title { color: var(--ink-soft); }
+.today-class--blocked .row__title,
+.today-class--removed .row__title,
+.today-class--blocked .today-time strong,
+.today-class--removed .today-time strong { color: var(--ink-faint); }
+
+/* ---------- needs attention ---------- */
+.today-attn-groups { padding: .1rem 0 .5rem; }
+.today-attn-group + .today-attn-group { margin-top: .35rem; }
+.today-attn-group__title {
+  display: flex; align-items: center; gap: .45rem;
+  padding: .55rem 1.2rem .35rem;
+  font-size: .7rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--copper-deep);
+}
+.today-attn-group__title .count {
+  display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 .35rem;
+  border-radius: 100px; background: var(--cream-deep); color: var(--ink-soft);
+  font-size: .68rem; letter-spacing: 0;
+}
+.today-attn-group .rows { border-top: 1px solid var(--line); }
+.today-attn-group .row { padding-block: .6rem; }
+.today-more {
+  display: flex; align-items: center; gap: .4rem;
+  padding: .5rem 1.2rem .55rem calc(1.2rem + 34px + .8rem);
+  border-top: 1px solid var(--line);
+  font-size: .8rem; font-weight: 600; color: var(--copper-deep);
+}
+.today-more:hover { background: rgba(176,112,62,.05); }
+.today-more__hint { margin-left: auto; font-weight: 500; color: var(--ink-faint); }
+.today-more .ic { width: 14px; height: 14px; }
+
+/* icon badges */
+.today-badge {
+  display: inline-grid; place-items: center; flex: none;
+  width: 34px; height: 34px; border-radius: 10px;
+  background: var(--copper-wash); color: var(--copper-deep);
+}
+.today-badge .ic { width: 17px; height: 17px; }
+.today-badge--warn { background: var(--warn-wash); color: var(--warn); }
+.today-badge--blocked { background: var(--warn-wash); color: var(--warn); }
+.today-badge--leave { background: var(--slate-wash); color: var(--slate); }
+.today-badge--full { background: var(--jade-wash); color: var(--jade); }
+.today-badge--neg { background: var(--warn-wash); color: var(--warn); }
+/* the side column is narrow: the button sits under the text rather than squeezing it */
+.today-attn--mark { flex-wrap: wrap; row-gap: .5rem; }
+.today-attn--mark .row__aside { flex-basis: 100%; margin-left: 0; padding-left: calc(34px + .8rem); }
+
+/* ---------- coming up · one line per day ---------- */
+.today-day {
+  display: flex; flex-direction: column; flex: none; width: 3.4rem; line-height: 1.15;
+}
+.today-day strong { font-size: .72rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--copper-deep); }
+.today-day span { font-family: var(--serif); font-size: 1.15rem; font-weight: 600; white-space: nowrap; }
+.today-dayrow .row__title { font-weight: 500; font-size: .9rem; }
+.today-dayrow .row__meta { display: flex; align-items: center; gap: .7rem; margin-top: .35rem; }
+.today-meter {
+  display: block; flex: 1; min-width: 0; height: 6px; border-radius: 100px;
+  background: var(--cream-deep); overflow: hidden;
+}
+.today-meter i { display: block; height: 100%; border-radius: inherit; background: var(--copper); }
+.today-meter__label { flex: none; min-width: 4.6rem; text-align: right; font-size: .72rem; color: var(--ink-faint); white-space: nowrap; }
+
+/* ---------- activity ---------- */
+.today-activity .row { align-items: flex-start; padding-block: .65rem; }
+.today-activity .avatar { margin-top: .1rem; }
+.today-activity__text { font-size: .86rem; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 980px) {
+  /* one column; cards interleave so "Needs attention" sits right after today's classes */
+  .today-grid { grid-template-columns: minmax(0, 1fr); }
+  .today-col { display: contents; }
+  .today-card--classes { order: 1; }
+  .today-card--attention { order: 2; }
+  .today-card--coming { order: 3; }
+  .today-card--activity { order: 4; }
+}
+
+/* four tiles get cramped below ~900px (the icon sidebar is still there): 2 × 2 */
+@media (max-width: 900px) {
+  .today-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .today-stat__go { display: block; margin-top: .15rem; }
+}
+
+@media (max-width: 760px) {
+  .page__actions:has(#todayBookLeave) { width: 100%; }
+  .today-stats { gap: .6rem; }
+  .today-stats .stat { padding: .75rem .8rem; }
+  .today-stats .stat__v { font-size: 1.8rem; }
+  .today-next { display: block; white-space: normal; }
+  .today-next__sep { display: none; }
+}
+
+@media (max-width: 520px) {
+  .today-row { flex-wrap: wrap; row-gap: .45rem; padding-inline: 1rem; }
+  .today-row .row__aside { flex-basis: 100%; margin-left: 0; justify-content: flex-start; }
+  .today-time { width: 4rem; }
+  .today-class .row__aside { padding-left: calc(4rem + .8rem); }
+  .today-attn .row__aside { padding-left: calc(34px + .8rem); }
+  .today-attn:not(.today-attn--mark) { flex-wrap: nowrap; }
+  .today-attn:not(.today-attn--mark) .row__aside { flex-basis: auto; margin-left: auto; padding-left: 0; }
+  .today-attn-group__title { padding-inline: 1rem; }
+  .today-more { padding-inline: calc(1rem + 34px + .8rem) 1rem; }
+  .today-dayrow { flex-wrap: nowrap; }
+}

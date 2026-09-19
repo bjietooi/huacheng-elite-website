@@ -100,6 +100,18 @@
   /* ---- Coaches (generic tags — real profiles deferred) ---- */
   HC.coaches = ["Coach A", "Coach B"];
 
+  /* ---- Staff for the coach/admin console (admin/) — starting data ----
+     The console keeps its own copy (admins add and edit coaches there).
+     role "admin" manages everything (coaches, credits, reports, any class);
+     role "coach" manages only classes where `coach` matches the
+     schedule's coach tag. login: false = no demo login offered.
+     Names stay generic until the timetable's coach tagging is finalised. */
+  HC.staff = [
+    { id: "admin",   name: "Studio Admin", role: "admin", coach: null,      email: "admin@huachengelite.com",   phone: "+65 6012 3400", title: "Studio management", login: true },
+    { id: "coach-a", name: "Coach A",      role: "coach", coach: "Coach A", email: "coach.a@huachengelite.com", phone: "+65 9100 2201", title: "Junior programmes", login: true },
+    { id: "coach-b", name: "Coach B",      role: "coach", coach: "Coach B", email: "coach.b@huachengelite.com", phone: "+65 9100 2202", title: "Elite & competitive", login: false }
+  ];
+
   /* ---- Credit packages (PayNow checkout is mocked) ----
      Prices follow the Junior-level class packages on the pricing sheet
      (5/$220, 10/$425, 20/$800). Elite, Competitive & private 1-to-1
