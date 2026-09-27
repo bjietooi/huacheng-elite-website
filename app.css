@@ -1030,6 +1030,13 @@ button.credits-pill:hover { background: #343b37; }
 }
 .pt-fill:hover { color: var(--copper); text-decoration-style: solid; }
 .pt-auth-demo { margin-top: .5rem; text-align: center; font-size: .8rem; color: var(--ink-faint); }
+.pt-auth-new {
+  margin-top: 1.1rem; padding-top: .95rem; border-top: 1px solid var(--line);
+  font-size: .84rem; line-height: 1.55; color: var(--ink-soft); text-align: center;
+}
+.pt-auth-new strong { color: var(--ink); }
+.pt-auth-new a { color: var(--copper-deep); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.pt-auth-new a:hover { color: var(--copper); }
 
 /* ---------- toasts: allow longer, wrapping messages ---------- */
 .toast { border-radius: 18px; max-width: min(560px, calc(100vw - 2rem)); line-height: 1.4; }
@@ -1125,21 +1132,53 @@ button.credits-pill:hover { background: #343b37; }
 }
 
 /* ============================================================
-   FAMILY CREDITS + BOOKING PICKER (pt-*) — one shared balance
+   TYPED CREDITS + BOOKING PICKER (pt-*) — one wallet per type
    ============================================================ */
 
-/* ---------- dashboard balance card ---------- */
+/* ---------- app bar pill: "◆ Junior 8 · Elite 2" or "◆ Credits" ---------- */
+.credits-pill { position: relative; }
+.pt-pill__wallets { display: inline-flex; align-items: baseline; gap: .3rem; min-width: 0; }
+.pt-pill__w { display: inline-flex; align-items: baseline; gap: .25rem; white-space: nowrap; color: rgba(237,234,225,.82); font-weight: 500; }
+.pt-pill__n { font-weight: 700; color: var(--cream); font-variant-numeric: tabular-nums; }
+.pt-pill__n.is-empty, .pt-pill__n.is-neg { color: #f3a594; }
+.pt-pill__n.is-low { color: #f0c79c; }
+.pt-pill__sep { color: rgba(237,234,225,.45); }
+.pt-pill__short { display: none; }
+.pt-pill--short .pt-pill__short { display: inline; }
+.pt-pill__alert {
+  position: absolute; top: 2px; right: 2px; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--seal-light); box-shadow: 0 0 0 2px var(--paper);
+}
+.pt-pill--named .pt-pill__alert { display: none; }
+
+/* ---------- credit-type chip ---------- */
+.pt-chip--credit { background: var(--copper-wash); color: var(--copper-deep); }
+.pt-chip--credit.is-elite { background: var(--slate-wash); color: var(--slate); }
+.pt-chip--credit.is-competitive { background: var(--plum-wash); color: var(--plum); }
+.pt-chip--credit.is-private { background: var(--jade-wash); color: var(--jade); }
+.pt-chip--credit::before { content: "◆"; font-size: .8em; line-height: 1; }
+
+/* ---------- dashboard balance card: one row per wallet ---------- */
 .pt-balance .balance-card__k { font-family: var(--sans); }
+.pt-wallets { display: grid; gap: .5rem; margin-top: .7rem; }
+.pt-wallet {
+  display: flex; align-items: baseline; gap: .6rem;
+  padding-bottom: .5rem; border-bottom: 1px solid rgba(247,245,239,.12);
+}
+.pt-wallet:last-child { border-bottom: 0; padding-bottom: 0; }
+.pt-wallet__n {
+  font-family: var(--serif); font-weight: 700; font-size: 2.1rem; line-height: 1; min-width: 1.6em;
+  font-variant-numeric: lining-nums;
+}
+.pt-wallet__t { flex: 1; min-width: 0; font-size: .92rem; color: rgba(247,245,239,.8); overflow-wrap: anywhere; }
+.pt-wallet__buy { color: var(--copper-soft); text-decoration-color: rgba(199,148,102,.5); font-size: .84rem; }
+.pt-wallet__buy:hover { color: #e6bd92; }
+.pt-wallet.is-low .pt-wallet__n { color: #f0c79c; }
+.pt-wallet.is-empty .pt-wallet__n, .pt-wallet.is-neg .pt-wallet__n { color: #f3a594; }
 .pt-balance-status {
   display: flex; align-items: center; gap: .45rem; margin-top: .55rem;
   font-size: .84rem; color: rgba(247,245,239,.78);
 }
-.pt-balance-status__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #7fc49b; }
-.pt-balance.is-low .pt-balance-status__dot { background: #f0c79c; }
-.pt-balance.is-low .balance-card__n { color: #f0c79c; }
-.pt-balance.is-empty .pt-balance-status__dot, .pt-balance.is-neg .pt-balance-status__dot { background: #f3a594; box-shadow: 0 0 0 3px rgba(243,165,148,.18); }
-.pt-balance.is-empty .balance-card__n, .pt-balance.is-neg .balance-card__n { color: #f3a594; }
-.pt-balance.is-empty .pt-balance-status, .pt-balance.is-neg .pt-balance-status { color: #f8c6ba; font-weight: 600; }
 
 /* ---------- booking dialog: "Who's coming?" dropdown ---------- */
 .pt-picker__label {
@@ -1196,7 +1235,44 @@ button.credits-pill:hover { background: #343b37; }
 .pt-grouplabel::after { content: ""; flex: 1; height: 1px; background: rgba(192,83,60,.2); }
 .pt-bcard--note { border-left: 3px solid var(--copper-soft); }
 
+/* ---------- schedule: which credits a class uses ---------- */
+.pt-cal-credit {
+  display: inline-flex; align-items: center; gap: .2rem; align-self: flex-start;
+  font-size: .66rem; font-weight: 700; letter-spacing: .04em; color: var(--ink-faint); line-height: 1.3;
+}
+.pt-cal-credit .dia { font-size: .9em; }
+.cal__book--buy { background: transparent; color: var(--copper-deep); border: 1.5px dashed rgba(176,112,62,.6); }
+.cal__book--buy:hover:not([disabled]) { background: var(--copper-wash); border-color: var(--copper); }
+
 /* ---------- credits view ---------- */
+.pt-walletbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1.1rem;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .8rem 1.2rem; box-shadow: var(--shadow-sm);
+}
+.pt-walletbar__k { font-size: .72rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); }
+.pt-walletbar__list { display: flex; flex-wrap: wrap; gap: .5rem .9rem; }
+.pt-walletbar__w { display: inline-flex; align-items: baseline; gap: .35rem; }
+.pt-walletbar__n { font-weight: 700; font-size: 1.05rem; font-variant-numeric: lining-nums; }
+.pt-walletbar__w.is-empty .pt-walletbar__n, .pt-walletbar__w.is-neg .pt-walletbar__n,
+.pt-walletbar__w.is-empty .dia, .pt-walletbar__w.is-neg .dia { color: var(--warn); }
+.pt-walletbar__t { font-size: .88rem; color: var(--ink-soft); }
+.pt-walletbar__who, .pt-walletbar__none { font-size: .84rem; color: var(--ink-faint); margin-left: auto; }
+.pt-pkgs__bal { font-size: .82rem; font-weight: 600; color: var(--ink-soft); }
+.pt-pkgs__note { margin: -.6rem 0 1rem; font-size: .88rem; color: var(--ink-faint); }
+.pt-pkgs.is-focus { scroll-margin-top: 80px; }
+.pt-pkgs.is-focus .pt-pkgs__title { color: var(--copper-deep); }
+.pt-h2filters { display: flex; flex-wrap: wrap; gap: .5rem .8rem; }
+.pt-ledger__tags { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .3rem; }
+.pt-acwallets { display: grid; gap: .5rem; }
+.pt-acwallet {
+  display: flex; align-items: center; gap: .8rem; padding: .7rem 1rem; border-radius: var(--radius);
+  background: rgba(237,234,225,.55); border: 1px solid var(--line);
+}
+.pt-acwallet__n { font-weight: 700; font-size: 1.05rem; min-width: 3rem; font-variant-numeric: lining-nums; }
+.pt-acwallet__t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pt-acwallet.is-empty .pt-acwallet__n, .pt-acwallet.is-empty .dia { color: var(--warn); }
+
 .pt-credit-strip { gap: .4rem .8rem; margin-bottom: 0; border-radius: var(--radius); }
 .pt-credit-strip .balance-strip__v { font-size: 1.05rem; }
 .pt-credit-strip__who { font-size: .82rem; color: var(--ink-soft); }
@@ -1248,4 +1324,19 @@ button.credits-pill:hover { background: #343b37; }
 @media (prefers-reduced-motion: reduce) {
   .pt-picker__chev, .pt-opt, .pt-picker__btn { transition: none !important; }
   .pt-picker__panel { animation: none !important; }
+}
+
+@media (max-width: 520px) {
+  /* long type names ("Private · Coach A") collapse to a plain Credits pill */
+  .pt-pill--long .pt-pill__wallets { display: none; }
+  .pt-pill--long .pt-pill__short { display: inline; }
+  .pt-pill--long .pt-pill__alert { display: block; }
+  .pt-acwallet { flex-wrap: wrap; }
+  .pt-walletbar__who { margin-left: 0; width: 100%; }
+}
+
+@media (max-width: 380px) {
+  .pt-pill--named .pt-pill__wallets { display: none; }
+  .pt-pill--named .pt-pill__short { display: inline; }
+  .pt-pill--named .pt-pill__alert { display: block; }
 }

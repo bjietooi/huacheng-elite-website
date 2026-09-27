@@ -133,6 +133,15 @@
     return !!((prog && prog.tier === "private") || (occ && occ.programmeId === "private"));
   }
 
+  // "Full" means nothing on a one-seat session — show the rest of the chips as usual
+  function occChipsFor(occ) {
+    if (!isPrivate(occ) || occ.spotsLeft > 0) return h.occChips(occ);
+    var copy = {};
+    for (var k in occ) { if (Object.prototype.hasOwnProperty.call(occ, k)) copy[k] = occ[k]; }
+    copy.spotsLeft = 1;
+    return h.occChips(copy);
+  }
+
   function opensAt(occ) {
     return "Attendance opens " + (occ.isToday ? "" : "on " + fmt.date(occ.date) + " ") + "at " + fmt.time(occ.time);
   }
@@ -218,7 +227,7 @@
         '<span class="nowrap">' + esc(fmt.date(occ.date, "long")) + "</span>" + sep +
         '<span class="nowrap">' + esc(fmt.timeRange(occ)) + "</span>" + sep +
         '<span class="nowrap cd-head__coach">' + icon("user") + esc(occ.coach) + "</span>" +
-        '<span class="chips">' + state + h.levelChip(occ.level) + h.occChips(occ) + "</span>"
+        '<span class="chips">' + state + h.levelChip(occ.level) + occChipsFor(occ) + "</span>"
     };
   }
 
@@ -280,8 +289,11 @@
         '<p class="cd-meta">Deleted by ' + whoWhen(occ.statusBy, occ.statusAt) + "</p>" +
         restoreControl(occ, manage)));
     } else if (occ.status === "blocked" && occ.blockKind === "leave") {
+      var win = occ.leaveWindow;
       out.push(h.notice("warn",
-        "<p><strong>" + esc(occ.coach) + " is on leave</strong> on this day — the class is closed to parent bookings.</p>" +
+        "<p><strong>" + esc(occ.coach) + " is on leave</strong> " +
+          (win ? esc(fmt.time(win.from) + " – " + fmt.time(win.to)) : "all day") +
+          " — the class is closed to parent bookings.</p>" +
         reasonLine(occ.reason) +
         '<p class="cd-meta">Leave added by ' + whoWhen(occ.statusBy, occ.statusAt) + "</p>" +
         '<div class="btn-row cd-notice__actions">' +
@@ -550,7 +562,7 @@
       info.push(hint("clock", opensAt(occ)));
     } else if (manage && occ.status === "blocked") {
       info.push(hint("info", occ.blockKind === "leave"
-        ? "Closed while the coach is on leave."
+        ? "Closed while " + occ.coach + " is on leave."
         : "Reopen the class to add students."));
     }
     if (occ.started && manage && !remark && active.length) {
@@ -1136,17 +1148,18 @@
     }
   }
 
-  // "Deduct 1 credit from Jane Tan's family  ◆12 → ◆11"
+  // "Deduct 1 Elite credit from Jane Tan's family  ◆4 → ◆3"
   function chargeLabel(occ) {
+    var typeId = typeOf(occ);
     var ch = assign.childId && db.child(assign.childId);
-    var out = "<strong>Deduct " + esc(fmt.credits(occ.cost)) + "</strong> from ";
+    var out = "<strong>Deduct " + esc(creditWord(typeId, occ.cost)) + "</strong> from ";
     if (ch) {
-      var bal = db.balance(ch.familyId);
+      var bal = db.balance(ch.familyId, typeId);
       out += esc(familyLabel(db.family(ch.familyId))) +
         ' <span class="cd-assign__after">' + h.credits(bal) + ' <span aria-hidden="true">→</span><span class="sr-only"> after: </span>' +
         h.credits(effectiveCharge() ? bal - occ.cost : bal) + "</span>";
     } else {
-      out += "the student's family credits";
+      out += "the student's family";
     }
     if (!canCredits()) out += '<br /><span class="field__hint">Only admins can book without deducting credits.</span>';
     return out;
@@ -1189,7 +1202,8 @@
 
   function assignChoice(c, occ) {
     var f = db.family(c.familyId) || {};
-    var bal = db.balance(c.familyId);
+    var typeId = typeOf(occ);
+    var bal = db.balance(c.familyId, typeId);
     var fits = db.levelFits(c, occ.programme);
     var d = [];
     if (c.age !== "" && c.age != null) d.push("Age " + esc(c.age));
@@ -1205,8 +1219,9 @@
           "</span>" +
           '<span class="choice__d">' + d.join(" · ") + "</span>" +
         "</span>" +
-        '<span class="cd-pick__bal" title="' + esc(poolTitle(f)) + '">' +
-          '<span class="cd-pick__k">Family credits</span>' + h.credits(bal) + "</span>" +
+        '<span class="cd-pick__bal' + (bal < occ.cost ? " cd-pick__bal--low" : "") +
+          '" title="' + esc(walletsTitle(f, typeId)) + '">' +
+          '<span class="cd-pick__k">' + esc(typeShort(typeId)) + " credits</span>" + h.credits(bal) + "</span>" +
       "</label>";
   }
 
@@ -1214,18 +1229,24 @@
     var out = "";
     var ch = assign.childId && db.child(assign.childId);
     if (ch && effectiveCharge()) {
-      var bal = db.balance(ch.familyId);
+      var typeId = typeOf(occ);
+      var bal = db.balance(ch.familyId, typeId);
       if (bal < occ.cost) {
         var fam = familyLabel(db.family(ch.familyId));
-        var has = bal === 0 ? fam + " has no credits left"
-          : bal < 0 ? fam + " is already at " + signedNum(bal) + " credits"
-          : fam + " only has " + fmt.credits(bal);
+        var short = typeShort(typeId);
+        var has = bal === 0 ? fam + " has no " + short + " credits left"
+          : bal < 0 ? fam + " is already at " + signedNum(bal) + " " + short + " credits"
+          : fam + " only has " + creditWord(typeId, bal);
         out += '<div class="notice notice--warn cd-assign__warn" id="cdWarnNeg">' + icon("alert") + "<div>" +
-          "<p><strong>" + esc(has.charAt(0).toUpperCase() + has.slice(1)) + ".</strong> Adding " + esc(firstName(ch.name)) +
-            " takes the family to " + esc(signedNum(bal - occ.cost)) + ".</p>" +
-          '<label class="check"><input type="checkbox" id="cdAllowNeg"' + (assign.allowNegative ? " checked" : "") + " />" +
-            "<span><strong>Allow negative balance</strong><br />" +
-            '<span class="field__hint">The studio follows up on payment.</span></span></label>' +
+          "<p><strong>" + esc(has.charAt(0).toUpperCase() + has.slice(1)) + ".</strong> " +
+            esc(typeName(typeId)) + " classes take " + esc(typeName(typeId)) + " credits" +
+            (isPrivate(occ) ? " — bought for this coach" : "") + ".</p>" +
+          (canCredits()
+            ? '<label class="check"><input type="checkbox" id="cdAllowNeg"' + (assign.allowNegative ? " checked" : "") + " />" +
+                "<span><strong>Add anyway</strong> — " + esc(firstName(ch.name)) + "'s family goes to " +
+                esc(signedNum(bal - occ.cost) + " " + short) + "<br />" +
+                '<span class="field__hint">The studio follows up on payment.</span></span></label>'
+            : '<p class="field__hint">Ask the studio admin to add ' + esc(short) + " credits first.</p>") +
           "</div></div>";
       }
     }
@@ -1269,10 +1290,17 @@
     if (!ch) { assignError("Choose a student to add.", "cdAssignResults", "cdAssignSearch"); return; }
 
     var charge = effectiveCharge();
-    var needNeg = charge && db.balance(ch.familyId) < occ.cost;
+    var typeId = typeOf(occ);
+    var needNeg = charge && db.balance(ch.familyId, typeId) < occ.cost;
     var needFull = occ.spotsLeft <= 0;
+    if (needNeg && !canCredits()) {
+      assignError(familyLabel(db.family(ch.familyId)) + " has no " + typeShort(typeId) +
+        " credits left — ask the studio admin to add some.", "cdWarnNeg");
+      return;
+    }
     if (needNeg && !assign.allowNegative) {
-      assignError("Tick “Allow negative balance” to add " + firstName(ch.name) + " — the family doesn't have enough credits.", "cdWarnNeg", "cdAllowNeg");
+      assignError("Tick “Add anyway” to book " + firstName(ch.name) + " without " + typeShort(typeId) + " credits.",
+        "cdWarnNeg", "cdAllowNeg");
       return;
     }
     if (needFull && !assign.allowFull) {

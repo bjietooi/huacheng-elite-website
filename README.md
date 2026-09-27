@@ -98,9 +98,8 @@ Two clickable prototypes that share one **mock database** (`hc-store.js`, saved 
 same data, so a change made in the console shows up in the parent portal straight away.
 The demo data is re-created fresh each day so the walkthrough always starts from "today".
 
-**Credits belong to each child**, not the family: every child has their own balance, packages are
-bought for one child at that child's level (Junior / Elite / Competitive), and a booking uses the
-booked child's credits.
+**Credits belong to the family and to a credit type** — Junior, Elite, Competitive or Private with one
+coach. A credit only books its own kind of class, and any of the family's children can spend it.
 
 **Parent portal** — `login.html` → `portal.html`
 - One account, several children: pick who's coming when booking; each child's credits shown separately.

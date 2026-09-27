@@ -45,6 +45,27 @@
 }
 .rep-thresh select.input:focus { box-shadow: none; }
 
+/* ---------- date range ---------- */
+.rep-range {
+  display: grid; gap: .5rem; margin: 0 0 1rem; padding: .85rem 1rem;
+  border-radius: var(--radius-lg); background: var(--white); border: 1px solid var(--line); box-shadow: var(--shadow-sm);
+}
+.rep-range__top { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; }
+.rep-range__t {
+  display: inline-flex; align-items: center; gap: .35rem; flex: none;
+  font-family: var(--sans); font-size: .68rem; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.rep-range__t .ic { width: 15px; height: 15px; color: var(--copper); }
+.rep-range__seg { flex-wrap: wrap; }
+.rep-range__seg button { padding: .3rem .7rem; font-size: .8rem; }
+.rep-range__dates { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-left: auto; }
+.rep-range__f { display: inline-flex; align-items: center; gap: .35rem; }
+.rep-range__f span { font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); }
+.rep-range__f .input { min-height: 36px; padding: .3rem .5rem; font-size: .84rem; width: auto; }
+.rep-range__d { font-size: .8rem; color: var(--ink-soft); }
+.rep-range__d strong { color: var(--ink); font-weight: 600; }
+
 /* ---------- KPI tiles ---------- */
 .rep-kpis { margin-bottom: .75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .rep-kpis .stat--ink { grid-column: 1 / -1; }
@@ -78,8 +99,11 @@
 /* ---------- chart layout ---------- */
 .rep-grid {
   display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  gap: 1rem; align-items: start; margin: 0 0 1rem;
+  gap: 1rem; align-items: stretch; margin: 0 0 1rem;
 }
+/* the ranked chart fills its column, so the two columns end together */
+.rep-grid > .rep-chart--top { display: flex; flex-direction: column; }
+.rep-grid > .rep-chart--top > .card__body { flex: 1; }
 .rep-side { display: grid; gap: 1rem; min-width: 0; }
 .rep-grid .card + .card, .rep-side .card + .card { margin-top: 0; }
 .rep-chart .card__head, .rep-month .card__head { align-items: flex-start; }
@@ -218,6 +242,42 @@
 .rep-flow__foot strong { font-family: var(--serif); font-size: 1.7rem; font-weight: 700; line-height: 1.1; color: var(--ink); margin-top: .1rem; }
 .rep-flow__foot em { font-style: normal; font-size: .74rem; color: var(--ink-soft); }
 
+/* ---------- credits by type (one series per panel: same colour, direct labels) ---------- */
+.rep-typegrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.4rem; align-items: start; }
+.rep-typecol { min-width: 0; }
+.rep-subhead {
+  margin-bottom: .6rem; font-size: .68rem; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.rep-tbars { display: grid; gap: .35rem; }
+.rep-tbar {
+  display: grid; grid-template-columns: minmax(5.5rem, 8.5rem) minmax(0, 1fr);
+  align-items: center; gap: .7rem; padding: 3px 8px; margin: 0 -8px; border-radius: 8px;
+  transition: background .15s var(--ease);
+}
+.rep-tbar:hover { background: rgba(176,112,62,.07); }
+.rep-tbar__label { display: flex; justify-content: flex-end; min-width: 0; }
+.rep-tbar__label .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rep-tbar__bar { background: var(--rep-avail); border-radius: 0 4px 4px 0; }
+.rep-tbar__bar--out { background: var(--rep-res); }
+.rep-tbar__pair { display: grid; gap: 3px; min-width: 0; }
+.rep-tbar--pair { align-items: center; }
+.rep-chart--type .rep-hbar__track { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.rep--intro .rep-tbar__bar { animation: repGrowX .6s var(--ease) both; animation-delay: calc(var(--i, 0) * 28ms); }
+
+/* ---------- classes + attendance in the period ---------- */
+.rep-activity { margin-top: 1rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+.rep-activity__lead { font-size: .9rem; color: var(--ink-soft); margin-bottom: .4rem; }
+.rep-activity__lead strong { font-family: var(--serif); font-size: 1.25rem; color: var(--ink); }
+.rep-activity__list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .4rem; }
+.rep-activity__list > div {
+  display: flex; flex-direction: column; gap: .05rem; padding: .45rem .5rem;
+  border-radius: var(--radius-sm); background: var(--cream); border: 1px solid var(--line);
+}
+.rep-activity__list dt { font-size: .68rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); }
+.rep-activity__list dd { margin: 0; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.rep-activity__list dd.is-zero { font-weight: 500; color: var(--ink-faint); }
+
 /* ---------- hand-off to Students ---------- */
 .rep-handoff {
   display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
@@ -246,8 +306,20 @@
   .rep-side { grid-template-columns: minmax(0, 1fr); }
 }
 
+@media screen and (max-width: 900px) {
+  .rep-typegrid { grid-template-columns: minmax(0, 1fr); gap: 1.1rem; }
+}
+
 @media screen and (max-width: 760px) {
   .rep .page__actions { width: 100%; }
+  .rep-range__dates { margin-left: 0; width: 100%; }
+  .rep-range__seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; border-radius: 16px; }
+  .rep-range__seg button { border-radius: 13px; }
+  .rep-range__f { flex: 1 1 45%; }
+  .rep-range__f .input { flex: 1; width: 100%; }
+  .rep-activity__list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rep-tbar { grid-template-columns: minmax(0, 1fr); gap: .15rem; }
+  .rep-tbar__label { justify-content: flex-start; }
   .rep .page__actions .btn { flex: 1 1 0; }
   .rep-thresh { flex: 1 1 100%; justify-content: space-between; }
   .rep-toggle { border-radius: 16px; }
@@ -287,11 +359,15 @@
   #page[data-view="reports"] .rep-kpi-link,
   #page[data-view="reports"] .rep-inline-link,
   #page[data-view="reports"] .rep-handoff,
+  #page[data-view="reports"] .rep-range__seg,
+  #page[data-view="reports"] .rep-range__dates,
   #page[data-view="reports"] .notice .btn,
   #page[data-view="reports"] .empty .btn { display: none !important; }
   .rep * { animation: none !important; transition: none !important; }
 
-  .rep .card, .rep .stat { box-shadow: none; break-inside: avoid; }
+  .rep .card, .rep .stat, .rep-range { box-shadow: none; break-inside: avoid; }
+  .rep-typegrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rep-tbar__bar { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .rep-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .rep-kpis .stat--ink { grid-column: auto; background: #fff; color: var(--ink); border: 1.5px solid var(--ink); }
   .rep-kpis .stat--ink .stat__k { color: var(--copper-deep); }

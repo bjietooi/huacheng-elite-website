@@ -36,14 +36,15 @@
 .cr-low__item:first-child { border-top: none; }
 .cr-low__who { min-width: 0; }
 .cr-low__who .person { max-width: 100%; text-align: left; }
-.cr-low__bal { display: flex; flex-direction: column; align-items: flex-end; gap: .05rem; font-size: 1.05rem; }
+.cr-low__bal { display: flex; flex-direction: column; align-items: flex-end; gap: .2rem; font-size: 1.05rem; }
 .cr-low__meta { font-size: .76rem; color: var(--ink-faint); white-space: nowrap; }
 .cr-low__item.is-out .cr-low__meta { color: var(--warn); }
 .cr-low__actions { flex-wrap: nowrap; gap: .35rem; }
 .cr-low__actions .btn .ic, .cr .empty .btn .ic { width: 14px; height: 14px; }
 
 /* ---------- manual adjustment log ---------- */
-.cr-month .input { min-height: 36px; padding-block: .35rem; font-size: .86rem; min-width: 170px; }
+.cr-filters { display: flex; flex-wrap: wrap; gap: .5rem; }
+.cr-filters .input { min-height: 36px; padding-block: .35rem; font-size: .86rem; min-width: 150px; }
 .cr-logcard .card__head { align-items: flex-start; }
 .cr-log th:first-child, .cr-log td:first-child { padding-left: 1.2rem; }
 .cr-log th:last-child, .cr-log td:last-child { padding-right: 1.2rem; }
@@ -52,6 +53,9 @@
 .cr-delta--minus { color: var(--warn); }
 .cr-note { max-width: 32ch; color: var(--ink-soft); overflow-wrap: anywhere; }
 .cr-who { min-width: 9rem; }
+.cr-type { white-space: nowrap; }
+.cr .chip--credit { font-variant-numeric: tabular-nums; }
+.cr .chip--credit b { font-weight: 700; }
 .cr-link {
   font-weight: 600; color: var(--ink); text-align: left;
   text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px;
@@ -90,7 +94,9 @@
   .cr-log td[data-label="Change"]::before { display: none; }
   .cr-log td[data-label="When"] { grid-column: 1 / 3; grid-row: 1; font-size: .78rem; color: var(--ink-faint); }
   .cr-log td[data-label="Family"] { grid-column: 1 / 3; grid-row: 2; }
-  .cr-log td[data-label="Change"] { grid-column: 3; grid-row: 1 / span 2; align-self: center; font-size: 1.25rem; }
+  .cr-log td[data-label="Change"] { grid-column: 3; grid-row: 1; align-self: end; font-size: 1.25rem; }
+  .cr-log td[data-label="Credits"] { grid-column: 3; grid-row: 2; justify-self: end; }
+  .cr-log td[data-label="Credits"]::before { display: none; }
   .cr-log td[data-label="Reason"] { grid-column: 1; grid-row: 3; }
   .cr-log td[data-label="By"] { grid-column: 2; grid-row: 3; }
   .cr-log td[data-label="Amount"] { grid-column: 3; grid-row: 3; }
@@ -106,7 +112,8 @@
   .cr-low__actions .btn { flex: 1; min-height: 36px; }
   .cr-log tr { grid-template-columns: minmax(0, 1fr) auto; padding-inline: 1rem; }
   .cr-log td[data-label="When"], .cr-log td[data-label="Family"] { grid-column: 1; }
-  .cr-log td[data-label="Change"] { grid-column: 2; }
+  .cr-log td[data-label="Change"] { grid-column: 2; grid-row: 1; }
+  .cr-log td[data-label="Credits"] { grid-column: 2; grid-row: 2; justify-self: end; }
   .cr-log td[data-label="Reason"] { grid-column: 1 / -1; grid-row: 3; }
   .cr-log td[data-label="Note to parent"] { grid-column: 1 / -1; grid-row: 4; }
   .cr-log td[data-label="By"] { grid-column: 1; grid-row: 5; }
@@ -117,7 +124,8 @@
   .cr-intro { padding: .9rem 1rem; }
   .cr-intro__go { width: 100%; }
   .cr-logcard .card__head { flex-wrap: wrap; }
-  .cr-month, .cr-month .input { width: 100%; }
+  .cr-filters { width: 100%; }
+  .cr-filters .input { flex: 1 1 140px; width: auto; }
 }
 
 /* ============================================================
@@ -145,6 +153,8 @@
 .adj-fam .person__text { flex: 1 1 10rem; }
 .adj-fam__name { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; white-space: normal; }
 .adj-fam__bal { flex: none; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; font-size: 1.05rem; }
+.adj-wallets { margin: -.1rem 0 .1rem; font-size: .8rem; color: var(--ink-soft); display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
+.adj-wallets .chips { display: inline-flex; }
 .adj-fam__k { font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
 .adj-note-hint { display: flex; align-items: flex-start; gap: .35rem; color: var(--ink-soft); }
 .adj-note-hint .ic { flex: none; width: 14px; height: 14px; margin-top: .15rem; color: var(--copper); }

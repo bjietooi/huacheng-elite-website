@@ -213,16 +213,16 @@
       : "no credits yet";
   }
 
+  // "Junior classes" → "Junior", for sentences like "Credits for Junior classes only"
+  function typeLabel(t) {
+    return String((t && t.name) || "").replace(/\s+classes$/i, "");
+  }
+
   function creditChip(typeId, credits) {
     var t = db.creditType(typeId);
     var name = t ? t.short || t.name : db.creditTypeShort(typeId);
     return '<span class="pt-chip pt-chip--credit ' + (t && t.kind === "private" ? "is-private" : "is-" + esc(typeId)) + '">' +
       esc(name) + (credits == null ? "" : " " + credits) + "</span>";
-  }
-
-  function tierLabel(tier) {
-    var t = String(tier || "");
-    return t.charAt(0).toUpperCase() + t.slice(1);
   }
 
   function perClass(p) {
@@ -1005,7 +1005,7 @@
         '<h1 class="view__title">Class schedule</h1>' +
         '<p class="view__sub">Book up to four weeks ahead — every class uses ' + dia(1) + " credit of its own type. " +
           (list.length
-            ? 'Your family has <strong class="pt-nowrap">' + esc(walletsText(list)) + "</strong>" + esc(sharedByTail(kids)) + "."
+            ? "Your family has <strong>" + esc(walletsText(list, ", ")) + "</strong>" + esc(sharedByTail(kids)) + "."
             : "Your family has no credits yet.") + "</p>" +
       "</div>" +
       '<div class="pt-schedbar">' + weekNavHTML(ws) + legendHTML() + "</div>" +
@@ -1125,7 +1125,6 @@
     var sel = {};          // childId → true
     var err = "";
     var errCredits = false;
-    var errType = null;
     var pickerOpen = false;
 
     // default: the first child who isn't already booked into this class
@@ -1380,7 +1379,6 @@
       } else {
         err = failed[0].error;
         errCredits = failed[0].code === "credits";
-        if (errCredits && failed[0].creditType) errType = failed[0].creditType;
         paint();
         toast("warn", "Couldn’t book: " + failed[0].error);
       }
@@ -1584,59 +1582,76 @@
   }
 
   /* ============================================================
-     CREDITS — one family balance: packages by level + history
+     CREDITS — one wallet per credit type: packages + history
      ============================================================ */
   function renderCredits(el) {
     var kids = db.children(fid);
-    var bal = db.balance(fid);
+    var list = wallets();
     var pk = db.packagesFor(fid);
-    var trial = pk.filter(function (p) { return p.price === 0; })[0];
-    var packs = pk.filter(function (p) { return p.price > 0; });
+    var trial = pk.filter(function (p) { return (p.trial || p.price === 0) && p.eligible; })[0];
+    var packs = pk.filter(function (p) { return !p.trial && p.price > 0; });
 
-    // which children train at each pricing level
-    var kidsAt = {};
-    kids.forEach(function (k) {
-      var t = k.level === "Competitive" ? "competitive" : k.level === "Elite" ? "elite" : "junior";
-      (kidsAt[t] = kidsAt[t] || []).push(k);
+    // credit types with packages: the family's own first, the rest behind a toggle
+    var order = [], seen = {};
+    packs.forEach(function (p) {
+      if (seen[p.creditType]) return;
+      seen[p.creditType] = true;
+      order.push(p.creditType);
     });
-    var mine = TIERS.filter(function (t) { return packs.some(function (p) { return p.tier === t && p.suggested; }); });
-    var others = TIERS.filter(function (t) { return mine.indexOf(t) < 0 && packs.some(function (p) { return p.tier === t; }); });
+    var mine = order.filter(function (t) { return packs.some(function (p) { return p.creditType === t && p.suggested; }); });
+    var others = order.filter(function (t) { return mine.indexOf(t) < 0; });
+    if (ui.creditType && mine.indexOf(ui.creditType) < 0 && others.indexOf(ui.creditType) >= 0) ui.otherRates = true;
 
-    function group(tier) {
-      var list = packs.filter(function (p) { return p.tier === tier; });
-      var who = kidsAt[tier] || [];
-      return '<section class="pt-pkgs" aria-labelledby="ptPkgs-' + tier + '">' +
+    function group(typeId) {
+      var rows = packs.filter(function (p) { return p.creditType === typeId; });
+      var t = (rows[0] && rows[0].type) || db.creditType(typeId) || { id: typeId, name: db.creditTypeName(typeId) };
+      var who = kids.filter(function (k) {
+        return (k.programmes || []).some(function (pid) { return db.creditTypeFor({ programmeId: pid }) === typeId; });
+      });
+      return '<section class="pt-pkgs' + (ui.creditType === typeId ? " is-focus" : "") + '" id="ptType-' + esc(typeId) + '"' +
+          ' aria-labelledby="ptTypeT-' + esc(typeId) + '">' +
           '<div class="pt-pkgs__head">' +
-            '<h3 class="pt-pkgs__title" id="ptPkgs-' + tier + '">' + esc((list[0] && list[0].tierLabel) || tierLabel(tier)) + " rates</h3>" +
-            (who.length ? chip(joinNames(who.map(childFirst)) + (who.length > 1 ? " train" : " trains") + " at this level", "ok") : "") +
+            '<h3 class="pt-pkgs__title" id="ptTypeT-' + esc(typeId) + '">' + esc(t.name) + "</h3>" +
+            '<span class="pt-pkgs__bal">' + dia(db.balance(fid, typeId)) + " now</span>" +
+            (who.length ? chip(joinNames(who.map(childFirst)) + (who.length > 1 ? " train" : " trains") + " here", "ok") : "") +
           "</div>" +
-          '<div class="packages">' + list.map(packageCardHTML).join("") + "</div>" +
+          '<p class="pt-pkgs__note">Credits for ' + esc(typeLabel(t)) + " classes only.</p>" +
+          '<div class="packages">' + rows.map(packageCardHTML).join("") + "</div>" +
         "</section>";
     }
 
-    var trialHTML = trial
-      ? '<section class="pt-pkgs pt-pkgs--trial" aria-label="Free trial"><div class="packages">' + packageCardHTML(trial) + "</div></section>"
-      : "";
-
+    // history
     if (ui.ledgerKid !== "all" && !kids.some(function (k) { return k.id === ui.ledgerKid; })) ui.ledgerKid = "all";
-    var rows = db.ledgerWithBalance(fid);
-    if (ui.ledgerKid !== "all") rows = rows.filter(function (l) { return l.childId === ui.ledgerKid; });
+    var all = db.ledgerWithBalance(fid);
+    var types = [];
+    all.forEach(function (l) { if (types.indexOf(l.creditType) < 0) types.push(l.creditType); });
+    if (ui.ledgerType !== "all" && types.indexOf(ui.ledgerType) < 0) ui.ledgerType = "all";
+    var rows = all.filter(function (l) {
+      return (ui.ledgerType === "all" || l.creditType === ui.ledgerType) &&
+        (ui.ledgerKid === "all" || l.childId === ui.ledgerKid);
+    });
     var shown = rows.slice(0, ui.ledgerLimit);
     var onlyName = ui.ledgerKid === "all" ? "" : childFirst(db.child(ui.ledgerKid));
 
-    var filter = kids.length > 1
-      ? '<div class="pt-seg" role="group" aria-label="Show history for">' +
-          ledgerSeg("all", "All") +
-          kids.map(function (k) { return ledgerSeg(k.id, childFirst(k)); }).join("") +
-        "</div>"
-      : "";
+    var filters = '<div class="pt-h2filters">' +
+        (types.length > 1
+          ? '<div class="pt-seg" role="group" aria-label="Show credit type">' +
+              ledgerSeg("type", "all", "All credits") +
+              types.map(function (t) { return ledgerSeg("type", t, db.creditTypeShort(t)); }).join("") +
+            "</div>"
+          : "") +
+        (kids.length > 1
+          ? '<div class="pt-seg" role="group" aria-label="Show history for">' +
+              ledgerSeg("kid", "all", "All") +
+              kids.map(function (k) { return ledgerSeg("kid", k.id, childFirst(k)); }).join("") +
+            "</div>"
+          : "") +
+      "</div>";
 
     var history = rows.length
-      ? (onlyName ? '<p class="muted pt-ledger-hint">' + esc(possessive(onlyName)) +
-            " classes and refunds — the balance is your family balance after each change.</p>" : "") +
+      ? '<p class="muted pt-ledger-hint">Every row shows which credits changed, and that wallet’s balance afterwards.</p>' +
         '<div class="pt-tablewrap"><table class="pt-ledger">' +
-          '<caption class="sr-only">' + esc(onlyName ? "Family credit history for " + onlyName + "’s classes" : "Family credit history") +
-            ", newest first</caption>" +
+          '<caption class="sr-only">Credit history' + esc(onlyName ? " for " + possessive(onlyName) + " classes" : "") + ", newest first</caption>" +
           '<thead><tr><th scope="col">Date</th><th scope="col">Description</th>' +
             '<th scope="col" class="num">Change</th><th scope="col" class="num">Balance</th></tr></thead>' +
           "<tbody>" + shown.map(ledgerRowHTML).join("") + "</tbody>" +
@@ -1651,62 +1666,68 @@
     el.innerHTML =
       '<div class="view__head">' +
         '<h1 class="view__title">Credits</h1>' +
-        '<p class="view__sub">One credit books one class for one child, and your whole family shares one balance. Checkout is a PayNow mock.</p>' +
+        '<p class="view__sub">Every class uses credits of its own type — Junior, Elite, Competitive or a coach’s private sessions. ' +
+          "Your whole family shares each wallet. Checkout is a PayNow mock.</p>" +
       "</div>" +
-      '<div class="balance-strip pt-credit-strip is-' + creditState(bal) + '">' +
-        '<span class="balance-strip__k">Family credits</span>' +
-        '<span class="balance-strip__v">' + dia(bal) + " credit" + (bal === 1 ? "" : "s") + "</span>" +
-        (kids.length ? '<span class="pt-credit-strip__who">' + esc(sharedByText(kids)) + "</span>" : "") +
-        '<span class="pt-credit-strip__status">' + esc(creditStatusText(bal)) + "</span>" +
+      '<div class="pt-walletbar' + (list.length ? "" : " is-empty") + '">' +
+        '<span class="pt-walletbar__k">Your credits</span>' +
+        (list.length
+          ? '<ul class="pt-walletbar__list">' + list.map(function (w) {
+              return '<li class="pt-walletbar__w is-' + creditState(w.credits) + '">' +
+                  '<span class="pt-walletbar__n">' + dia(w.credits) + "</span>" +
+                  '<span class="pt-walletbar__t">' + esc(w.type.name) + "</span>" +
+                "</li>";
+            }).join("") + "</ul>"
+          : '<span class="pt-walletbar__none">No credits yet</span>') +
+        (kids.length ? '<span class="pt-walletbar__who">' + esc(sharedByText(kids)) + "</span>" : "") +
       "</div>" +
       '<h2 class="pt-h2 pt-h2--first">Buy credits</h2>' +
-      '<p class="muted pt-h2-sub">Credits go into your family balance and can be used by any of your children — ' +
-        "pick the level that matches their classes." + (mine.length ? " Your children’s levels come first." : "") + "</p>" +
-      (trial && trial.eligible ? trialHTML : "") +
+      '<p class="muted pt-h2-sub">Credits go into your family’s wallet for that type and can be used by any of your children — ' +
+        "pick the type that matches their classes." + (mine.length ? " Your children’s types come first." : "") + "</p>" +
+      (trial ? '<section class="pt-pkgs pt-pkgs--trial" aria-label="Free trial"><div class="packages">' + packageCardHTML(trial) + "</div></section>" : "") +
       mine.map(group).join("") +
       (others.length
         ? '<div class="pt-otherlevels">' +
-            '<button class="btn btn--ghost btn--sm" type="button" id="ptOtherLevels" data-action="other-levels" aria-expanded="' + ui.otherLevels + '"' +
-              ' aria-controls="ptOtherLevelsPanel">' +
-              (ui.otherLevels ? "Hide " : "Show ") + esc(joinNames(others.map(tierLabel))) + " rates</button>" +
-            '<div id="ptOtherLevelsPanel"' + (ui.otherLevels ? "" : " hidden") + ">" + (ui.otherLevels ? others.map(group).join("") : "") + "</div>" +
+            '<button class="btn btn--ghost btn--sm" type="button" id="ptOtherRates" data-action="other-rates" aria-expanded="' + ui.otherRates + '"' +
+              ' aria-controls="ptOtherRatesPanel">' + (ui.otherRates ? "Hide other rates" : "Show other rates") + "</button>" +
+            '<div id="ptOtherRatesPanel"' + (ui.otherRates ? "" : " hidden") + ">" + (ui.otherRates ? others.map(group).join("") : "") + "</div>" +
           "</div>"
         : "") +
-      (trial && !trial.eligible ? trialHTML : "") +
-      '<div class="pt-h2row" id="ptHistory"><h2 class="pt-h2">Credit history</h2>' + filter + "</div>" +
+      '<div class="pt-h2row" id="ptHistory"><h2 class="pt-h2">Credit history</h2>' + filters + "</div>" +
       history;
 
-    if (scrollToHistory) {
-      scrollToHistory = false;
-      var h = byId("ptHistory");
-      if (h && h.scrollIntoView) { try { h.scrollIntoView({ block: "start" }); } catch (e) {} }
-    }
+    var focusEl = ui.creditType ? byId("ptType-" + ui.creditType) : scrollToHistory ? byId("ptHistory") : null;
+    ui.creditType = null;
+    scrollToHistory = false;
+    if (focusEl && focusEl.scrollIntoView) { try { focusEl.scrollIntoView({ block: "start" }); } catch (e) {} }
 
-    function ledgerSeg(id, label) {
-      return '<button class="pt-seg__btn" type="button" id="ptLedgerKid-' + esc(id) + '" aria-pressed="' + (ui.ledgerKid === id) +
-        '" data-action="ledger-kid" data-arg="' + esc(id) + '">' + esc(label) + "</button>";
+    function ledgerSeg(what, id, label) {
+      var on = (what === "kid" ? ui.ledgerKid : ui.ledgerType) === id;
+      return '<button class="pt-seg__btn" type="button" id="ptLedger' + (what === "kid" ? "Kid" : "Type") + "-" + esc(id) +
+        '" aria-pressed="' + on + '" data-action="ledger-' + what + '" data-arg="' + esc(id) + '">' + esc(label) + "</button>";
     }
   }
 
   function packageCardHTML(p) {
-    var isTrial = p.price === 0;
+    var isTrial = !!p.trial || p.price === 0;
     var featured = !isTrial && (p.tag === "Popular" || p.tag === "Best value");
     var off = isTrial && !p.eligible;
     var badge = isTrial ? (p.claimed ? "Claimed" : p.tag) : p.tag;
-    var level = p.tierLabel || tierLabel(p.tier);
+    var type = p.type || db.creditType(p.creditType) || { name: db.creditTypeName(p.creditType) };
     var note = isTrial
       ? (p.claimed ? "Your family has already used its free trial credit."
-        : p.eligible ? "One complimentary class for a new family — any of your children can use it."
+        : p.eligible ? "One complimentary " + typeLabel(type) + " class for a new family."
         : "The free trial is for new families.")
-      : creditsText(p.credits) + " · " + level + " rate" + (p.credits > 1 ? " · " + perClass(p) + " per class" : "");
+      : (p.note || creditsText(p.credits) + " for " + typeLabel(type) + " classes") +
+        (p.credits > 1 ? " · " + perClass(p) + " per class" : "");
     var btn = off
       ? '<button class="btn btn--ghost pkg__btn" type="button" disabled>' + (p.claimed ? "Already claimed" : "For new families") + "</button>"
       : '<button class="btn ' + (featured || isTrial ? "btn--primary" : "btn--ghost") + ' pkg__btn" type="button" data-action="buy"' +
-          ' data-arg="' + esc(p.id) + '"' + (isTrial ? "" : ' aria-label="' + esc("Buy " + p.name.toLowerCase() + " at the " + level + " rate") + '"') + ">" +
-          (isTrial ? "Claim free credit" : "Buy " + esc(p.name.toLowerCase())) + "</button>";
+          ' data-arg="' + esc(p.id) + '" aria-label="' + esc(isTrial ? "Claim a free trial credit" : "Buy " + p.name.toLowerCase() + " — " + type.name) + '">' +
+          (isTrial ? "Claim free credit" : "Buy") + "</button>";
     return '<article class="pkg' + (featured ? " is-featured" : "") + (off ? " is-claimed" : "") + (isTrial ? " is-trial" : "") + '">' +
         (badge ? '<span class="pkg__badge">' + esc(badge) + "</span>" : "") +
-        '<h3 class="pkg__name">' + esc(p.name) + "</h3>" +
+        '<h4 class="pkg__name">' + esc(p.name) + "</h4>" +
         '<div class="pkg__credits"><span class="n">' + p.credits + '</span><span class="u">credit' + (p.credits === 1 ? "" : "s") + "</span></div>" +
         '<div class="pkg__price">' + (isTrial ? '<span class="free">Free</span>' : esc(HC.formatPrice(p.price))) + "</div>" +
         '<p class="pkg__note">' + esc(note) + "</p>" +
@@ -1743,24 +1764,26 @@
     return '<tr class="pt-ledger__row is-' + esc(l.type) + '">' +
         '<td class="pt-ledger__date">' + esc(db.formatDate(date) + year) +
           '<span class="pt-sub">' + esc(HC.formatTime(l.at.slice(11, 16) || "00:00")) + "</span></td>" +
-        '<td class="pt-ledger__desc">' + (l.childId ? '<span class="pt-ledger__kid">' + kidChip(l.childId) + "</span>" : "") +
+        '<td class="pt-ledger__desc">' +
+          '<span class="pt-ledger__tags">' + creditChip(l.creditType) + (l.childId ? kidChip(l.childId) : "") + "</span>" +
           '<span class="pt-ledger__what">' + esc(what) + "</span>" +
           (detail ? '<span class="pt-sub">' + esc(detail) + "</span>" : "") + extra + "</td>" +
         '<td class="num pt-ledger__chg ' + (l.delta < 0 ? "is-neg" : "is-pos") + '">' +
           '<span class="sr-only">' + (l.delta < 0 ? "Used " : "Added ") + "</span>" + esc(signed(l.delta)) + "</td>" +
-        '<td class="num pt-ledger__bal"><span class="pt-ledger__balk">Family balance </span>' + l.balanceAfter + "</td>" +
+        '<td class="num pt-ledger__bal"><span class="pt-ledger__balk">' + esc(db.creditTypeShort(l.creditType)) + " balance </span>" +
+          l.balanceAfter + "</td>" +
       "</tr>";
   }
 
   function purchase(packageId) {
     var p = db.packagesFor(fid).filter(function (x) { return x.id === packageId; })[0];
     if (!p) {
-      toast("warn", "That package isn’t available any more — please choose again.");
+      toast("warn", "That package isn’t on sale any more — please choose again.");
       return;
     }
     if (p.price === 0) {
       var res = db.purchase(fid, p.id, { by: "parent:" + fid });
-      if (res.ok) toast("ok", "Free trial credit added to your family balance — enjoy your first class!");
+      if (res.ok) toast("ok", "Free trial credit added — enjoy your first class!");
       else toast("warn", res.error);
       return;
     }
@@ -1774,6 +1797,7 @@
     var fam = db.family(fid);
     var kids = db.children(fid);
     var only = kids.length === 1;
+    var acWallets = wallets();
 
     var kidRows = kids.length
       ? '<ul class="pt-kidlist">' + kids.map(function (k) {
@@ -1824,7 +1848,7 @@
 
       '<section class="panel pt-children" aria-labelledby="ptChildrenTitle">' +
         '<h2 class="panel__title" id="ptChildrenTitle">Children</h2>' +
-        '<p class="muted pt-panel-intro">One account and one credit balance for the whole family — any of your children can use the credits, and you choose who’s coming each time you book.</p>' +
+        '<p class="muted pt-panel-intro">One account for the whole family — the credits below are shared by all your children, and you choose who’s coming each time you book.</p>' +
         kidRows +
         '<form class="pt-addchild" id="addChildForm" novalidate>' +
           '<h3 class="pt-h3">Add a child</h3>' +
@@ -1838,6 +1862,21 @@
           '<p class="field-error" id="acNewError" role="alert"></p>' +
           '<p class="muted">Classes start from age ' + MIN_AGE + ". New children start at Junior level — your coach will update this after an assessment.</p>" +
         "</form>" +
+      "</section>" +
+
+      '<section class="panel pt-credits-panel" aria-labelledby="ptAcCreditsTitle">' +
+        '<h2 class="panel__title" id="ptAcCreditsTitle">Credits</h2>' +
+        '<p class="muted pt-panel-intro">One wallet per credit type, shared by everyone on the account — a class only takes credits of its own type.</p>' +
+        (acWallets.length
+          ? '<ul class="pt-acwallets">' + acWallets.map(function (w) {
+              return '<li class="pt-acwallet is-' + creditState(w.credits) + '">' +
+                  '<span class="pt-acwallet__n">' + dia(w.credits) + "</span>" +
+                  '<span class="pt-acwallet__t">' + esc(w.type.name) + "</span>" +
+                  '<button class="btn btn--ghost btn--sm" type="button" data-action="credits-type" data-arg="' + esc(w.type.id) + '"' +
+                    ' aria-label="Buy ' + esc(w.type.name) + ' credits">Top up</button>' +
+                "</li>";
+            }).join("") + "</ul>"
+          : '<p class="pt-card__empty pt-card__empty--box">No credits yet — buy a package to start booking.</p>') +
       "</section>" +
 
       '<div class="panel">' +
@@ -2092,12 +2131,13 @@
     function build(p) {
       var amount = HC.formatPrice(p.price);
       return modalHead("Complete payment",
-          "<strong>" + esc(p.name) + "</strong> · " + esc(p.tierLabel || tierLabel(p.tier)) + " rate — " +
-          dia(p.credits) + " credit" + (p.credits === 1 ? "" : "s") + " added to your family balance on payment.") +
+          "<strong>" + esc(p.name) + "</strong> · " + esc(p.type ? p.type.name : db.creditTypeName(p.creditType)) + " — " +
+          dia(p.credits) + " credit" + (p.credits === 1 ? "" : "s") + " added to that wallet on payment.") +
         '<div class="paynow">' +
           '<div class="paynow__brand">Pay<b>Now</b></div>' +
           '<div class="paynow__amount">' + esc(amount) + "</div>" +
-          '<div class="paynow__credits">' + dia(p.credits) + " credit" + (p.credits === 1 ? "" : "s") + " · family balance</div>" +
+          '<div class="paynow__credits">' + dia(p.credits) + " " + esc(db.creditTypeShort(p.creditType)) +
+            " credit" + (p.credits === 1 ? "" : "s") + "</div>" +
           paynowQR() +
           '<p class="paynow__cap">Scan with your bank app to pay</p>' +
         "</div>" +
@@ -2115,7 +2155,8 @@
           var res = db.purchase(fid, packageId, { by: "parent:" + fid });
           if (!res.ok) { toast("warn", res.error); return; }
           closeModal();
-          toast("ok", "Payment received — " + creditsText(p0.credits) + " added to your family balance.");
+          toast("ok", "Payment received — " + p0.credits + " " + db.creditTypeShort(p0.creditType) +
+            " credit" + (p0.credits === 1 ? "" : "s") + " added.");
         });
       }
     });

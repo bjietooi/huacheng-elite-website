@@ -90,31 +90,6 @@
     money: function (n) {
       return "S$" + Number(n || 0).toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     },
-    // "Junior ◆8" — a wallet, or just the type when credits are omitted
-    creditChip: function (typeId, credits, extraKind) {
-      var t = db.creditType(typeId);
-      var kind = t && t.kind === "private" ? "sub" : typeId === "elite" ? "elite"
-        : typeId === "competitive" ? "competitive" : "junior";
-      return '<span class="chip chip--' + (extraKind || kind) + ' chip--credit" title="' +
-        esc(t ? t.name : "Credits") + '">' + esc(t ? (t.short || t.name) : "Credits") +
-        (credits == null ? "" : ' <b>' + credits + "</b>") + "</span>";
-    },
-
-    // every wallet a family holds: [{ type, credits }] from HC.db.balances()
-    wallets: function (list, opts) {
-      opts = opts || {};
-      if (!list || !list.length) return '<span class="muted">No credits</span>';
-      return '<span class="chips">' + list.map(function (w) {
-        return Admin.h.creditChip(w.type.id, w.credits);
-      }).join("") + "</span>";
-    },
-
-    creditTypeOptions: function (selected, opts) {
-      opts = opts || {};
-      var list = db.creditTypes().map(function (t) { return { value: t.id, label: t.name }; });
-      if (opts.all) list.unshift({ value: "all", label: opts.allLabel || "All credit types" });
-      return Admin.h.options(list, selected);
-    },
 
     credits: function (n) { return Admin.plural(n, "credit"); },
     signed: function (n) { return (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n); },
@@ -221,6 +196,32 @@
       return '<span class="rating" title="' + esc(scale ? scale.label : v + "/5") + '">' +
         '<span class="rating__dots" aria-hidden="true">' + dots + "</span>" +
         '<span class="rating__label">' + esc(scale ? scale.label : v + "/5") + "</span></span>";
+    },
+
+    // "Junior ◆8" — a wallet, or just the type when credits are omitted
+    creditChip: function (typeId, credits, extraKind) {
+      var t = db.creditType(typeId);
+      var kind = t && t.kind === "private" ? "sub" : typeId === "elite" ? "elite"
+        : typeId === "competitive" ? "competitive" : "junior";
+      return '<span class="chip chip--' + (extraKind || kind) + ' chip--credit" title="' +
+        esc(t ? t.name : "Credits") + '">' + esc(t ? (t.short || t.name) : "Credits") +
+        (credits == null ? "" : ' <b>' + credits + "</b>") + "</span>";
+    },
+
+    // every wallet a family holds: [{ type, credits }] from HC.db.balances()
+    wallets: function (list, opts) {
+      opts = opts || {};
+      if (!list || !list.length) return '<span class="muted">No credits</span>';
+      return '<span class="chips">' + list.map(function (w) {
+        return Admin.h.creditChip(w.type.id, w.credits);
+      }).join("") + "</span>";
+    },
+
+    creditTypeOptions: function (selected, opts) {
+      opts = opts || {};
+      var list = db.creditTypes().map(function (t) { return { value: t.id, label: t.name }; });
+      if (opts.all) list.unshift({ value: "all", label: opts.allLabel || "All credit types" });
+      return Admin.h.options(list, selected);
     },
 
     credits: function (n) {

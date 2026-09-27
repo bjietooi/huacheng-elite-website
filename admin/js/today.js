@@ -288,20 +288,35 @@
     });
   }
 
-  // blocked classes and coach leave days, in date order
+  // The leave entry that closed a class — a coach can be off several times a day.
+  function leaveOf(occ) {
+    var list = db.leavesOn(occ.coach, occ.date);
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === occ.leaveId) return list[i];
+    }
+    return null;
+  }
+
+  // blocked classes and coach leave (whole days or single time windows), in date order
   function offRows(d, ahead) {
     var items = [];
-    var days = {};
+    var spells = {};
     ahead.forEach(function (o) {
       if (o.status !== "blocked") return;
       if (o.blockKind === "leave") {
-        var k = o.coach + "|" + o.date;
-        if (!days[k]) {
-          var lv = db.leaveFor(o.coach, o.date);
-          days[k] = { coach: o.coach, date: o.date, count: 0, reason: o.reason, id: lv ? lv.id : "" };
-          items.push({ sort: o.date + " 00:00", day: days[k] });
+        var k = o.leaveId || o.coach + "|" + o.date;
+        if (!spells[k]) {
+          var lv = leaveOf(o);
+          var win = o.leaveWindow;
+          spells[k] = {
+            coach: o.coach, date: o.date, count: 0, id: lv ? lv.id : "",
+            allDay: lv ? lv.allDay : !win,
+            label: lv ? db.leaveLabel(lv) : win ? fmt.time(win.from) + " – " + fmt.time(win.to) : "All day",
+            reason: lv ? lv.reason : ""
+          };
+          items.push({ sort: o.date + " " + (win ? win.from : "00:00"), spell: spells[k] });
         }
-        days[k].count++;
+        spells[k].count++;
         return;
       }
       items.push({
@@ -318,15 +333,18 @@
     });
     return items.sort(function (a, b) { return a.sort.localeCompare(b.sort); }).map(function (it) {
       if (it.html) return it.html;
-      var lv = it.day;
-      // open the Leave page on this leave day (right filter, tab and month)
+      var lv = it.spell;
+      // part of a day off reads as "away 4:00 PM – 6:00 PM", not a whole day on leave
+      var title = lv.allDay ? lv.coach + " on leave" : lv.coach + " away " + lv.label;
+      // open the Leave page on this leave (right filter, tab and month)
       return linkRow(
         'data-go="leave"' + (lv.id ? params({ show: lv.id }) : "") +
-          ' aria-label="' + esc(lv.coach + " on leave " + fmt.date(lv.date, "long") + ", " +
+          ' aria-label="' + esc(title + ", " + fmt.date(lv.date, "long") + ", " +
             Admin.plural(lv.count, "class", "classes") + " blocked. Show leave") + '"',
         badge("leave", "leave"),
-        esc(lv.coach) + " on leave",
+        esc(title),
         '<span class="nowrap">' + esc(fmt.date(lv.date)) + "</span> · " +
+          (lv.allDay ? esc("All day") + " · " : "") +
           esc(Admin.plural(lv.count, "class", "classes") + " blocked") +
           (lv.reason ? " · " + esc(lv.reason) : ""),
         h.chip("FYI", "muted"),
@@ -424,7 +442,10 @@
     if (blocked) parts.push(blocked + " blocked");
     if (removed) parts.push(removed + " deleted");
     if (full) parts.push(full + " full");
-    var chips = leaves.map(function (l) { return h.chip(l.coach + " on leave", "leave", l.reason); }).join("");
+    var chips = leaves.map(function (l) {
+      return h.chip(l.allDay ? l.coach + " on leave" : l.coach + " · " + db.leaveLabel(l), "leave",
+        l.reason || db.leaveLabel(l));
+    }).join("");
 
     return linkRow(
       'data-go="schedule"' + params({ week: db.weekStart(iso) }) +

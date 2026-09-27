@@ -1,6 +1,6 @@
 # Huacheng Elite — booking mock: where things stand
 
-_Last updated: 27 Sep 2026._
+_Last updated: 27 Sep 2026 (v4 complete)._
 
 Two clickable prototypes, no backend. Both read and write one mock database (`hc-store.js`) kept in
 the browser's `localStorage`, so a change made by staff shows up for parents straight away.
@@ -15,35 +15,25 @@ account** (Jane Tan, children Ethan & Chloe), or any seeded parent email such as
 `marcus.lim@example.com`. "Reset demo data" in the console's account menu restores everything; the
 demo re-seeds itself each new day so the walkthrough always starts from "today".
 
-## What is live right now (store version 3)
+## What the prototypes do (store version 4)
 
-Shared family credits · parent booking with a "Who's coming?" dropdown (one or several children) ·
-camps (one-off sessions across several date ranges) · coaches managed by admins · coach "My classes"
-view with Upcoming / Now / Passed and attendance state · blocking, deleting (one date, weekly series
-or a whole camp), whole-day leave · attendance, coach remarks · Students list with credits ·
-Credits (manual adjustments + log) · Reports dashboard with CSV export.
+Credits belong to a family **and to a credit type** — Junior, Elite, Competitive, or Private with one
+coach — and a credit only books its own kind of class. A family can hold several wallets; any of
+their children can spend them.
 
-## Work in progress (store version 4) — branch `v4-typed-credits`
+**Parents** — sign in with the email the studio holds (no public sign-up). Book one or several
+children at once from a dropdown, see which credits each class uses, buy packages grouped by credit
+type, and read attendance, coach remarks, notices and credit history.
 
-The client asked for six things on 27 Sep. The data layer is **done and tested**
-(`tests/store.test.js`, 1,059 checks); the screens were being rebuilt when this note was written.
+**Coaches** — "My classes" for the week with Upcoming / Now / Passed and whether attendance is
+marked; take attendance; write remarks; block a class; delete one date; book leave for a whole day
+**or a few hours**; add a student to a class.
 
-1. **Leave for part of a day** — `addLeave({coach, date, from, to})`; only classes overlapping the
-   window close. Several windows a day allowed. _Store done; Leave screen in progress._
-2. **Reports by date range** — `creditReport({from, to})`: balances as at `to`, money and activity
-   within the range, plus `activity` and per-type totals. _Store done; Reports in progress._
-3. **Typed credits** — a credit belongs to a credit type and books only that type's classes:
-   Junior, Elite, Competitive, and Private (one type per coach). A family holds several wallets
-   (`balance(familyId, typeId)`, `balances(familyId)`). _Store done; screens in progress._
-4. **No public sign-up** — admins create the family, parent and children in the console.
-   _Store already supports it; Students screen + portal sign-up removal in progress._
-5. **Admin-managed packages** — `packages()`, `addPackage`, `updatePackage`, `retirePackage`.
-   _Store done; new Packages page in progress._
-6. **Private 1-to-1 packages** — console-only `private` programme (capacity 1) plus per-coach credit
-   types and packages (Coach A S$200, Coach B S$160 in the demo data). _Store done._
-
-**Not deployed.** The review links still show version 3. Deploy only once the screens match the new
-store and the suites pass, otherwise Credits, Reports, Students and the portal's buy page will break.
+**Admins** — Today dashboard; whole schedule; one-off classes, camps (several date ranges) and
+private 1-to-1 sessions; coaches (logins, renames, handing over weekly classes); students and
+families created in the console; typed credit adjustments; **Packages** (price points per credit
+type, including private rates); and a **Reports** dashboard filtered by any date range with CSV
+export.
 
 ## Picking the work back up
 

@@ -205,7 +205,7 @@
         '<div class="leave-item__top">' +
           '<h3 class="leave-item__title">' + esc(fmt.date(date, "long")) + "</h3>" +
           h.chip(relative(date), past ? "muted" : "info") +
-          (group.items.length > 1 ? h.chip(Admin.plural(group.items.length, "time off"), "muted") : "") +
+          (group.items.length > 1 ? h.chip(group.items.length + " periods off", "muted") : "") +
         "</div>" +
         '<div class="leave-item__body">' +
           (Admin.isAdmin()
@@ -335,26 +335,47 @@
     var isPast = iso < today;
     var isToday = iso === today;
     var label = fmt.date(iso);
-    var names = list.map(function (l) { return l.coach; });
-    // a single coach in scope: any leave counts; "All": only when every active coach is off
-    var onLeave = coach ? list.length > 0
-      : list.length > 0 && active.every(function (c) { return names.indexOf(c) >= 0; });
+
+    // one entry per coach, so a coach with two windows is marked once
+    var byCoach = {}, names = [];
+    list.forEach(function (l) {
+      if (!byCoach[l.coach]) { byCoach[l.coach] = []; names.push(l.coach); }
+      byCoach[l.coach].push(l);
+    });
+    function wholeDay(c) {
+      return (byCoach[c] || []).some(function (l) { return l.allDay; });
+    }
+    // one coach in scope: a whole day off; "All": every active coach off all day
+    var onLeave = coach ? wholeDay(coach)
+      : list.length > 0 && active.length > 0 && active.every(wholeDay);
+    // leave booked, but the day isn't fully off — half-filled marker
+    var part = list.length > 0 && !onLeave;
 
     var cls = "leave-cal__cell leave-cal__day" +
       (isPast ? " is-past" : "") + (isToday ? " is-today" : "") +
-      (list.length ? " has-leave" : "") + (onLeave ? " is-leave" : "");
+      (list.length ? " has-leave" : "") + (onLeave ? " is-leave" : "") + (part ? " is-part" : "");
+
+    // "Coach A: 4:00 PM – 6:00 PM, 7:00 PM – 8:00 PM" per coach, for the tooltip
+    var lines = names.map(function (c) {
+      var windows = byCoach[c].map(function (l) { return db.leaveLabel(l); }).join(", ");
+      return (Admin.isAdmin() ? c : "You're off") + ": " + windows +
+        (byCoach[c].length === 1 && byCoach[c][0].reason ? " — " + byCoach[c][0].reason : "");
+    });
+    var who = names.length
+      ? (Admin.isAdmin() ? names.join(" and ") : "You") + (onLeave ? " off all day" : " off part of the day")
+      : "";
 
     var marks = "";
-    if (list.length && (Admin.isAdmin())) {
-      marks = '<span class="leave-cal__marks" aria-hidden="true">' + list.map(function (l) {
-        return '<i class="leave-cal__mark">' + esc(coachInitial(l.coach)) + "</i>";
+    if (list.length && Admin.isAdmin()) {
+      marks = '<span class="leave-cal__marks" aria-hidden="true">' + names.map(function (c) {
+        return '<i class="leave-cal__mark' + (wholeDay(c) ? "" : " leave-cal__mark--part") + '">' + esc(coachInitial(c)) + "</i>";
       }).join("") + "</span>";
     } else if (list.length) {
-      marks = '<span class="leave-cal__marks" aria-hidden="true"><i class="leave-cal__dot"></i></span>';
+      marks = '<span class="leave-cal__marks" aria-hidden="true"><i class="leave-cal__dot' +
+        (onLeave ? "" : " leave-cal__dot--part") + '"></i></span>';
     }
     var num = '<span class="leave-cal__num">' + esc(+iso.slice(8, 10)) + "</span>";
-    var who = Admin.isAdmin() ? names.join(" and ") + " on leave" : "You're on leave";
-    var title = list.length ? who + (list[0].reason && list.length === 1 ? " — " + list[0].reason : "") : "";
+    var title = lines.join("\n");
     var id = ' id="lvDay-' + iso + '" data-date="' + iso + '"';
 
     if (list.length && (onLeave || isPast)) {
@@ -362,7 +383,8 @@
         ' aria-label="' + esc(label + " — " + who + ". Show leave") + '" title="' + esc(title) + '">' + num + marks + "</button>";
     }
     if (!isPast) {
-      var extra = list.length ? " (" + names.join(" and ") + " already on leave)" : "";
+      // part of the day is still bookable: the rest of the day is free
+      var extra = list.length ? " (" + lines.join("; ") + ")" : "";
       return '<button type="button" class="' + cls + '"' + id + ' data-book-date="' + iso + '"' +
         ' aria-label="' + esc("Book leave on " + label + extra) + '"' + (title ? ' title="' + esc(title) + '"' : "") + ">" +
         num + marks + "</button>";
@@ -423,8 +445,10 @@
     if (!Admin.can("leave", lv.coach)) { Admin.toast("warn", "You can only change your own leave."); return; }
     var imp = impactOf(lv);
     var day = fmt.date(lv.date);
+    var when = lv.allDay ? "on <strong>" + esc(day) + "</strong>"
+      : "on <strong>" + esc(day) + "</strong> between <strong>" + esc(windowLabel(lv)) + "</strong>";
     var body =
-      "<p>Classes on <strong>" + esc(day) + "</strong> will reopen for booking. " +
+      "<p>Classes " + when + " will reopen for booking. " +
         "Students who were refunded are not re-booked automatically.</p>" +
       (imp.classes.length
         ? "<p>" + esc(Admin.plural(imp.classes.length, "class", "classes") + (imp.classes.length === 1 ? " reopens" : " reopen")) +
@@ -434,7 +458,7 @@
         : "");
     Admin.confirm({
       title: "Cancel leave on " + day + "?",
-      sub: Admin.isAdmin() ? esc(lv.coach) : "",
+      sub: esc((Admin.isAdmin() ? lv.coach + " · " : "") + db.leaveLabel(lv)),
       body: body,
       confirmLabel: "Cancel leave",
       cancelLabel: "Keep leave",
@@ -473,18 +497,33 @@
           '<p class="leave-fixed">' + h.avatar(coach, "sm") + "<span>" + esc(coach) + "</span></p>" +
           '<p class="field__hint">You can book leave for yourself. Ask the studio admin to change someone else\'s.</p></div>';
 
+    var win = defaultWindow(coach, from || today);
     var body =
       '<form id="lvForm" class="leave-form" novalidate>' +
         coachField +
         '<div class="field-row">' +
-          '<div class="field"><label for="lvFrom">From</label>' +
+          '<div class="field"><label for="lvFrom">First day</label>' +
             '<input type="date" id="lvFrom" required min="' + today + '" value="' + esc(from) + '"' +
               (from ? "" : " autofocus") + ' aria-describedby="lvFromErr" />' +
             '<p class="field-error" id="lvFromErr"></p></div>' +
-          '<div class="field"><label for="lvTo">To <span class="field__opt">(optional)</span></label>' +
+          '<div class="field"><label for="lvTo">Last day <span class="field__opt">(optional)</span></label>' +
             '<input type="date" id="lvTo" min="' + (from || today) + '" aria-describedby="lvToHint lvToErr" />' +
             '<p class="field__hint" id="lvToHint">For more than one day · up to ' + MAX_SPAN + " days</p>" +
             '<p class="field-error" id="lvToErr"></p></div>' +
+        "</div>" +
+        '<div class="field">' +
+          '<span class="field__label" id="lvSpanLabel">Time off</span>' +
+          '<div class="seg leave-span" role="group" aria-labelledby="lvSpanLabel">' +
+            '<button type="button" id="lvSpanAll" data-leave-span="all" aria-pressed="true">All day</button>' +
+            '<button type="button" id="lvSpanPart" data-leave-span="part" aria-pressed="false">Part of the day</button>' +
+          "</div>" +
+        "</div>" +
+        '<div class="field-row leave-times" id="lvTimes" hidden>' +
+          '<div class="field"><label for="lvTimeFrom">From</label>' +
+            '<select id="lvTimeFrom">' + h.timeOptions(win.from) + "</select></div>" +
+          '<div class="field"><label for="lvTimeTo">To</label>' +
+            '<select id="lvTimeTo" aria-describedby="lvTimeErr">' + h.timeOptions(win.to) + "</select>" +
+            '<p class="field-error" id="lvTimeErr"></p></div>' +
         "</div>" +
         '<div class="field-row">' +
           '<div class="field"><label for="lvReason">Reason</label>' +
@@ -499,9 +538,8 @@
 
     Admin.openModal({
       title: "Book leave",
-      sub: isAdmin
-        ? "The coach's classes are blocked for the whole day, so parents can't book them. Anyone already booked gets their credit back and a notification."
-        : "Your classes are blocked for the whole day, so parents can't book them. Anyone already booked gets their credit back and a notification.",
+      sub: (isAdmin ? "Block a coach's whole day, or just part of it. " : "Block your whole day, or just part of it. ") +
+        "Only the classes in that time are closed for booking — anyone already booked gets their credit back and a notification.",
       body: body,
       size: "md",
       actions:
@@ -519,6 +557,9 @@
       to: cardEl.querySelector("#lvTo"),
       reason: cardEl.querySelector("#lvReason"),
       note: cardEl.querySelector("#lvNote"),
+      time: cardEl.querySelector("#lvTimeFrom"),
+      timeTo: cardEl.querySelector("#lvTimeTo"),
+      times: cardEl.querySelector("#lvTimes"),
       impact: cardEl.querySelector("#lvImpact"),
       formErr: cardEl.querySelector("#lvFormErr"),
       submit: cardEl.querySelector("#lvSubmit"),
@@ -526,15 +567,27 @@
     };
     var tried = false;
     var busy = false;
+    var span = "all";          // all | part — "Part of the day" shows the time row
 
     function read() {
-      return {
+      var v = {
         coach: isAdmin ? el.coach.value : Admin.staff.coach,
         from: el.from.value,
         to: el.to.value,
         reason: el.reason.value,
-        note: el.note.value.trim()
+        note: el.note.value.trim(),
+        span: span,
+        window: null
       };
+      if (span === "part") v.window = { from: el.time.value, to: el.timeTo.value };
+      return v;
+    }
+
+    function paintSpan() {
+      Array.prototype.forEach.call(cardEl.querySelectorAll("[data-leave-span]"), function (b) {
+        b.setAttribute("aria-pressed", String(b.getAttribute("data-leave-span") === span));
+      });
+      el.times.hidden = span !== "part";
     }
 
     function validate(v) {
@@ -550,11 +603,15 @@
         else if (!errs.from && v.to < v.from) errs.to = "Must be on or after the first day.";
         else if (!errs.from && db.daysBetween(v.from, v.to) + 1 > MAX_SPAN) errs.to = "Book up to " + MAX_SPAN + " days at a time.";
       }
+      if (v.window && db.toMinutes(v.window.to) <= db.toMinutes(v.window.from)) {
+        errs.time = "The end time must be after the start time.";
+      }
       return errs;
     }
 
     function showErrors(errs) {
-      [["coach", el.coach, "#lvCoachErr"], ["from", el.from, "#lvFromErr"], ["to", el.to, "#lvToErr"]].forEach(function (f) {
+      [["coach", el.coach, "#lvCoachErr"], ["from", el.from, "#lvFromErr"], ["to", el.to, "#lvToErr"],
+        ["time", el.timeTo, "#lvTimeErr"]].forEach(function (f) {
         var msgEl = cardEl.querySelector(f[2]);
         if (f[1]) {
           f[1].classList.toggle("invalid", !!errs[f[0]]);
@@ -564,23 +621,28 @@
       });
     }
 
-    // classes: what the leave blocks (leaveImpact skips classes already under way)
-    // running: today's classes that have started — they carry on as normal
+    // classes:   what the leave blocks (a part-day window only closes the classes it overlaps)
+    // untouched: that day's other classes — outside the window, so they carry on
+    // running:   classes already under way today — the store leaves them as they ran
+    // skip:      a date where this leave would clash with leave already booked
     function compute(v, errs) {
-      if (errs.coach || errs.from || errs.to || !v.from) return null;
-      var today = db.todayISO();
-      var r = { dates: dateRange(v.from, v.to || v.from), add: [], skip: [], classes: [], bookings: 0, running: [] };
+      if (errs.coach || errs.from || errs.to || errs.time || !v.from) return null;
+      var r = { dates: dateRange(v.from, v.to || v.from), add: [], skip: [], classes: [], bookings: 0,
+        untouched: [], running: [], window: v.window };
       r.dates.forEach(function (d) {
-        if (db.leaveFor(v.coach, d)) { r.skip.push(d); return; }
+        var clash = clashOn(v.coach, d, v.window);
+        if (clash) { r.skip.push({ date: d, clash: clash }); return; }
         r.add.push(d);
-        var imp = db.leaveImpact(v.coach, d);
+        var imp = db.leaveImpact(v.coach, d, v.window);
         r.classes = r.classes.concat(imp.classes);
         r.bookings += imp.bookings;
-        if (d === today) {
-          r.running = db.occurrencesForDate(d, { coach: v.coach }).filter(function (o) {
-            return o.status === "open" && o.started;
-          });
-        }
+        var blocked = {};
+        imp.classes.forEach(function (o) { blocked[o.key] = 1; });
+        db.occurrencesForDate(d, { coach: v.coach }).forEach(function (o) {
+          if (o.status !== "open" || blocked[o.key]) return;
+          if (o.started) r.running.push(o);
+          else r.untouched.push(o);
+        });
       });
       return r;
     }
@@ -599,37 +661,56 @@
       }
       var who = isAdmin ? v.coach + " is" : "You're";
       if (!r.add.length) {
+        var first = r.skip[0];
         return h.notice("warn", "<strong>" + esc(who + " already on leave " +
-          (r.dates.length > 1 ? "on all of these dates." : "on " + fmt.date(v.from) + ".")) + "</strong> Nothing new to book.");
+          (r.dates.length > 1 ? "on all of these dates." : "on " + fmt.date(v.from) +
+            (first ? " (" + db.leaveLabel(first.clash).toLowerCase() + ")." : "."))) + "</strong> Nothing new to book.");
       }
+      var multi = r.add.length > 1;
+      var win = r.window;
       var head;
       if (!r.classes.length) {
-        var multi = r.add.length > 1;
-        head = "<strong>No classes to block</strong> — " + esc(r.running.length
-          ? "today's classes have already started" + (multi ? " and nothing else is on the timetable." : ".")
+        head = "<strong>No classes to block</strong> — " + esc(win
+          ? "no classes overlap " + windowLabel(win) + (multi ? " on these dates." : " that day.")
+          : r.running.length ? "today's classes have already started" + (multi ? " and nothing else is on the timetable." : ".")
           : multi ? "there's nothing on the timetable on these dates." : "there's nothing on the timetable that day.");
       } else {
         head = "<strong>Blocks " + esc(Admin.plural(r.classes.length, "class", "classes")) + "</strong>" +
           (r.bookings
-            ? " and refunds <strong>" + esc(Admin.plural(r.bookings, "booked student")) + "</strong> — their parents get the credit back and a notification."
+            ? " and refunds <strong>" + esc(Admin.plural(r.bookings, "student")) + "</strong> — their parents get the credit back and a notification."
             : " — no students are booked yet.");
       }
-      if (r.add.length > 1) head = esc(r.add.length + " days of leave") + " · " + head;
+      // "3 days of leave · 4:00 PM – 6:00 PM each day · Blocks …"
+      var prefix = [];
+      if (multi) prefix.push(r.add.length + " days of leave");
+      if (win) prefix.push(windowLabel(win) + (multi ? " each day" : ""));
+      if (prefix.length) head = esc(prefix.join(" · ")) + " · " + head;
 
-      // one line per class, in date order: blocked, carrying on, or a day skipped
+      // one line per class, in date order: blocked, untouched, carrying on, or a day skipped
       var items = r.classes.map(function (o) {
         return { sort: o.date + " " + o.time, html: impactItem(fmt.date(o.date) + " · " + fmt.time(o.time),
           esc(o.name), o.booked ? o.booked + " booked" : "No bookings") };
-      }).concat(r.running.map(function (o) {
+      }).concat(r.untouched.map(function (o) {
+        return { sort: o.date + " " + o.time, html: impactItem(fmt.date(o.date) + " · " + fmt.time(o.time),
+          esc(o.name) + " " + h.chip("Outside the hours · not affected", "muted"),
+          o.booked ? o.booked + " booked" : "No bookings", "is-unaffected") };
+      })).concat(r.running.map(function (o) {
         return { sort: o.date + " " + o.time, html: impactItem(fmt.date(o.date) + " · " + fmt.time(o.time),
           esc(o.name) + " " + h.chip(o.ended ? "Finished · not affected" : "Under way · not affected", "muted"),
           o.booked ? o.booked + " booked" : "No bookings", "is-running") };
-      })).concat(r.skip.map(function (d) {
-        return { sort: d + " 00:00", html: impactItem(fmt.date(d), "Already on leave — skipped", "", "is-skip") };
+      })).concat(r.skip.map(function (s) {
+        return { sort: s.date + " 00:00", html: impactItem(fmt.date(s.date),
+          esc("Already on leave (" + db.leaveLabel(s.clash).toLowerCase() + ") — skipped"), "", "is-skip") };
       })).sort(function (a, b) { return a.sort.localeCompare(b.sort); }).map(function (it) { return it.html; });
 
       return h.notice(r.bookings ? "warn" : "info", head) +
         (items.length ? '<ul class="leave-impact__list" aria-label="Classes on these dates">' + items.join("") + "</ul>" : "") +
+        (r.untouched.length && win
+          ? '<p class="leave-impact__note" id="lvOutsideNote">' + Admin.icon("info") +
+              "<span>" + esc(Admin.plural(r.untouched.length, "other class", "other classes") +
+                " that day " + (r.untouched.length === 1 ? "isn't" : "aren't") + " affected — only classes that overlap " +
+                windowLabel(win) + " close.") + "</span></p>"
+          : "") +
         (r.running.length
           ? '<p class="leave-impact__note" id="lvRunningNote">' + Admin.icon("info") +
               "<span>Classes already under way today aren't affected — they keep their bookings and attendance.</span></p>"
@@ -655,6 +736,8 @@
       var out = {};
       if (v.from && errs.from) out.from = errs.from;
       if (v.to && errs.to) out.to = errs.to;
+      // the times are picked by hand, so flag a backwards window straight away
+      if (v.window && errs.time) out.time = errs.time;
       return out;
     }
 
@@ -676,9 +759,11 @@
       }
       busy = true;
       var reason = s.v.reason + (s.v.note ? " — " + s.v.note : "");
+      var win = s.v.window;
       var made = [], failed = [], classes = 0, refunded = 0;
       s.r.add.forEach(function (d) {
-        var res = db.addLeave({ coach: s.v.coach, date: d, reason: reason }, { by: Admin.by() });
+        var res = db.addLeave({ coach: s.v.coach, date: d, reason: reason,
+          from: win ? win.from : null, to: win ? win.to : null }, { by: Admin.by() });
         if (res && res.ok) {
           made.push(res.leave);
           classes += res.classes || 0;
@@ -701,7 +786,7 @@
       flash(made[0].id);
 
       var msg = (made.length === 1 ? "Leave booked for " + fmt.date(made[0].date) : made.length + " days of leave booked") +
-        (isAdmin ? " (" + s.v.coach + ")" : "") + " — " +
+        (win ? ", " + windowLabel(win) : "") + (isAdmin ? " (" + s.v.coach + ")" : "") + " — " +
         Admin.plural(classes, "class", "classes") + " blocked" +
         (refunded ? ", " + Admin.plural(refunded, "booking") + " refunded" : "") + ".";
       Admin.check({ ok: true }, msg);
@@ -712,10 +797,18 @@
       }
     }
 
+    Array.prototype.forEach.call(cardEl.querySelectorAll("[data-leave-span]"), function (b) {
+      b.addEventListener("click", function () {
+        span = b.getAttribute("data-leave-span");
+        paintSpan();
+        update();
+      });
+    });
     form.addEventListener("input", update);
     form.addEventListener("change", update);
     form.addEventListener("submit", submit);
     el.submit.addEventListener("click", submit);
+    paintSpan();
     update();
   }
 
@@ -833,9 +926,10 @@
       el.innerHTML =
         h.pageHead({
           title: "Leave",
-          sub: Admin.isAdmin()
-            ? "A leave day blocks all of that coach's classes for the day — booked students are refunded and notified automatically."
-            : "A leave day blocks all your classes for the day — booked students are refunded and notified automatically.",
+          sub: (Admin.isAdmin()
+            ? "Book a coach off for a whole day or just a few hours"
+            : "Book yourself off for a whole day or just a few hours") +
+            " — only the classes in that time close, and booked students are refunded and notified automatically.",
           actions: '<button type="button" class="btn btn--primary" id="lvAdd">' + Admin.icon("plus") + "Book leave</button>"
         }) +
         filter +

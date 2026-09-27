@@ -45,6 +45,8 @@
   var dormantDays = DORMANT_DAYS;
   var LOW_CREDITS = 2;      // 1–2 credits left counts as low
   var LEDGER_PAGE = 25;     // Credits tab rows before "Show all"
+  var MIN_AGE = 4;          // the studio takes students from age 4
+  var AGE_ERROR = "Students join from age " + MIN_AGE + " — use a whole number from " + MIN_AGE + " to 99.";
 
   // dir: the aria-sort direction of that order
   var SORTS = [
@@ -170,6 +172,11 @@
   }
 
   function safeId(str) { return String(str).replace(/[^\w-]/g, "_"); }
+
+  function ageOk(v) {
+    var s = String(v == null ? "" : v).trim();
+    return s === "" || (/^\d+$/.test(s) && +s >= MIN_AGE && +s <= 99);
+  }
 
   function telHref(phone) { return "tel:" + String(phone || "").replace(/[^\d+]/g, ""); }
 
@@ -376,7 +383,7 @@
       ? "Showing all " + Admin.plural(total, "student")
       : "Showing " + rows.length + " of " + Admin.plural(total, "student") +
         (st.credit !== "all" ? " · " + creditFilter(st.credit).label.toLowerCase() : "") +
-        (st.ctype !== "all" ? " · holding " + typeName(st.ctype) + " credits" : "") +
+        (st.ctype !== "all" ? " · holding " + typeShort(st.ctype) + " credits" : "") +
         (st.mine ? " · only students in your classes" : "");
 
     el.innerHTML =
@@ -386,7 +393,8 @@
           Admin.plural(Object.keys(fams).length, "family", "families") +
           (isAdmin ? " · siblings share their family's credits" : "")),
         actions: isAdmin
-          ? '<button type="button" class="btn btn--ghost btn--sm" id="stuExport">' + Admin.icon("download") + "Export CSV</button>"
+          ? '<button type="button" class="btn btn--primary btn--sm" id="stuAdd">' + Admin.icon("plus") + "Add student</button>" +
+            '<button type="button" class="btn btn--ghost btn--sm" id="stuExport">' + Admin.icon("download") + "Export CSV</button>"
           : ""
       }) +
       toolbarHtml(st) +
@@ -653,6 +661,9 @@
     if (st.mine) {
       actions.push('<button type="button" class="btn btn--quiet btn--sm" id="stuShowAll">Show all students</button>');
     }
+    if (Admin.isAdmin()) {
+      actions.push('<button type="button" class="btn btn--primary btn--sm" id="stuAddEmpty">' + Admin.icon("plus") + "Add student</button>");
+    }
     var desc = st.mine ? "No students in your recent or upcoming classes match. Try the full list."
       : !filtered && st.credit === "dormant" ? "Everyone holding credits has booked a class or attended one in the last " + st.days + " days."
       : !filtered && st.credit === "negative" ? "No student owes credits right now."
@@ -709,6 +720,9 @@
     }
     var exp = el.querySelector("#stuExport");
     if (exp) exp.addEventListener("click", exportCsv);
+    el.querySelectorAll("#stuAdd, #stuAddEmpty").forEach(function (b) {
+      b.addEventListener("click", function () { openAddStudentModal(); });
+    });
     var list = el.querySelector("#stuList");
     if (list) {
       list.addEventListener("click", function (e) {
@@ -973,7 +987,7 @@
       '<dl class="stu-credit__facts">' + facts.map(function (x) {
         return "<div><dt>" + esc(x[0]) + "</dt><dd>" + esc(x[1]) + "</dd></div>";
       }).join("") + "</dl>" +
-      '<div class="stu-credit__acts">' + (shown.length === 1 ? adjustBtn(f, shown[0].type.id) : adjustBtn(f)) +
+      '<div class="stu-credit__acts">' + (shown.length === 1 ? "" : adjustBtn(f)) +
         (withLink ? '<button type="button" class="btn btn--quiet btn--sm" data-stu-tab="credits">Family credit history' + Admin.icon("chevron-right") + "</button>" : "") +
       "</div>" +
     "</div>";
@@ -1209,7 +1223,7 @@
           ? '<div class="stu-more"><button type="button" class="btn btn--quiet btn--sm" id="stuLedgerAll" data-stu-act="ledger-all">Show all ' + list.length + " entries</button></div>"
           : "")
       : typeId !== "all"
-        ? h.empty("wallet", "No " + typeName(typeId) + " entries", esc("Nothing under " + typeName(typeId) + " credits" + (mineOnly ? " for " + name : "") + " yet."), "", "sm")
+        ? h.empty("wallet", "No " + typeShort(typeId) + " entries", esc("Nothing under " + typeName(typeId) + (mineOnly ? " for " + name : "") + " yet."), "", "sm")
       : mineOnly
         ? h.empty("wallet", "Nothing for " + name + " yet", esc(name + " hasn't used any of the family's credits yet."), "", "sm")
         : h.empty("wallet", "No credit activity yet", esc(familyLabel(f) + " hasn't bought, used or been given any credits."), "", "sm");
@@ -1551,6 +1565,305 @@
   }
 
   /* ============================================================
+     ADD STUDENT (admin) — the console is the only way in now:
+     there is no public sign-up, so admins create the family, the
+     parent and the children here.
+       "New family"  → createFamily({ parentName, email, phone, children })
+       "Existing"    → addChild(familyId, {...}) for each child
+     ============================================================ */
+  var add = null;
+
+  function blankKid() { return { seq: add.seq++ }; }
+
+  function kidBlockHtml(k, n, removable) {
+    var progs = HC.programmes;
+    return '<fieldset class="stu-kidblock" data-kid="' + k.seq + '">' +
+        '<legend class="stu-kidblock__t"><span>Student ' + n + "</span>" +
+          (removable ? '<button type="button" class="btn btn--quiet btn--xs stu-danger" data-add-act="drop-kid" data-kid="' + k.seq + '">' +
+            Admin.icon("x") + "Remove</button>" : "") +
+        "</legend>" +
+        '<div class="field-row">' +
+          '<div class="field"><label for="stuNewName-' + k.seq + '">Name</label>' +
+            '<input type="text" id="stuNewName-' + k.seq + '" data-add="name" autocomplete="off" maxlength="80" />' +
+            '<p class="field-error" id="stuNewNameErr-' + k.seq + '" role="alert"></p></div>' +
+          '<div class="field"><label for="stuNewAge-' + k.seq + '">Age <span class="field__opt">(optional)</span></label>' +
+            '<input type="number" id="stuNewAge-' + k.seq + '" data-add="age" inputmode="numeric" min="' + MIN_AGE + '" max="99" step="1" />' +
+            '<p class="field-error" id="stuNewAgeErr-' + k.seq + '" role="alert"></p></div>' +
+        "</div>" +
+        '<div class="field"><label for="stuNewLevel-' + k.seq + '">Level</label>' +
+          '<select id="stuNewLevel-' + k.seq + '" data-add="level">' + h.options(db.levels, "Junior") + "</select></div>" +
+        '<fieldset class="field stu-fieldset">' +
+          '<legend class="field__label">Usual classes <span class="field__opt">(optional)</span></legend>' +
+          '<div class="stu-progs">' + progs.map(function (p) {
+            return '<label class="check"><input type="checkbox" name="stuNewProg-' + k.seq + '" value="' + esc(p.id) + '" />' +
+              '<span class="stu-prog"><span class="stu-prog__name">' + esc(p.name) + "</span>" +
+              '<span class="stu-prog__lvl">' + esc(p.level) + "</span></span></label>";
+          }).join("") + "</div>" +
+        "</fieldset>" +
+      "</fieldset>";
+  }
+
+  function famPickHtml() {
+    var q = String(add.q || "").trim().toLowerCase();
+    var list = db.families().filter(function (f) {
+      if (!q) return true;
+      var kids = db.children(f.id).map(function (k) { return k.name; }).join(" ");
+      return (f.parentName + " " + f.email + " " + (f.phone || "") + " " + kids).toLowerCase().indexOf(q) >= 0 ||
+        String(f.phone || "").replace(/\D/g, "").indexOf(q.replace(/\D/g, "")) >= 0 && q.replace(/\D/g, "").length >= 3;
+    }).sort(function (a, b) { return a.parentName.localeCompare(b.parentName); });
+    var shown = list.slice(0, 8);
+    if (!shown.length) {
+      return '<p class="stu-none muted" id="stuFamNone">No family matches “' + esc(add.q) + '”. Try another name, or add a new family.</p>';
+    }
+    return '<ul class="stu-fampick">' + shown.map(function (f) {
+      var kids = db.children(f.id);
+      return '<li><label class="choice stu-fam-choice">' +
+          '<input type="radio" name="stuAddFam" id="stuFam-' + esc(safeId(f.id)) + '" value="' + esc(f.id) + '"' +
+            (add.familyId === f.id ? " checked" : "") + " />" +
+          '<span class="stu-choice__body">' +
+            '<span class="choice__t">' + esc(f.parentName) + "</span>" +
+            '<span class="choice__d">' + esc(f.email + (kids.length ? " · " + kids.map(function (k) { return k.name; }).join(", ") : " · no students yet")) + "</span>" +
+          "</span>" +
+        "</label></li>";
+    }).join("") + "</ul>" +
+      (list.length > shown.length ? '<p class="stu-count stu-fampick__more">' + esc(list.length - shown.length + " more — keep typing to narrow it down") + "</p>" : "");
+  }
+
+  function addBodyHtml() {
+    var modes = [
+      { id: "new", label: "New family" },
+      { id: "existing", label: "Add to an existing family" }
+    ];
+    return '<form id="stuAddForm" novalidate>' +
+      '<div class="seg stu-seg stu-addmode" role="group" aria-label="Where does this student go?">' +
+        modes.map(function (m) {
+          return '<button type="button" id="stuAddMode-' + m.id + '" data-add-mode="' + m.id + '" aria-pressed="' + (add.mode === m.id) + '">' +
+            esc(m.label) + "</button>";
+        }).join("") +
+      "</div>" +
+      '<div id="stuAddNew"' + (add.mode === "new" ? "" : " hidden") + ">" +
+        h.notice("info", "<p>Parents sign in to the portal with this email address — any password works in this demo. " +
+          "There is no public sign-up, so studio staff add families here.</p>") +
+        '<div class="field"><label for="stuNewParent">Parent / guardian name</label>' +
+          '<input type="text" id="stuNewParent" autocomplete="off" maxlength="80" />' +
+          '<p class="field-error" id="stuNewParentErr" role="alert"></p></div>' +
+        '<div class="field-row">' +
+          '<div class="field"><label for="stuNewEmail">Email</label>' +
+            '<input type="email" id="stuNewEmail" autocomplete="off" maxlength="120" />' +
+            '<p class="field-error" id="stuNewEmailErr" role="alert"></p></div>' +
+          '<div class="field"><label for="stuNewPhone">Phone <span class="field__opt">(optional)</span></label>' +
+            '<input type="tel" id="stuNewPhone" autocomplete="off" maxlength="30" /></div>' +
+        "</div>" +
+      "</div>" +
+      '<div id="stuAddExisting"' + (add.mode === "existing" ? "" : " hidden") + ">" +
+        '<div class="field"><label for="stuFamSearch">Find the family</label>' +
+          '<div class="search">' + Admin.icon("search") +
+            '<input type="search" id="stuFamSearch" placeholder="Parent, student, email or phone" autocomplete="off" value="' + esc(add.q || "") + '" />' +
+          "</div>" +
+          '<p class="field-error" id="stuFamErr" role="alert"></p></div>' +
+        '<div id="stuFamList">' + famPickHtml() + "</div>" +
+      "</div>" +
+      '<div id="stuAddKids">' + add.kids.map(function (k, i) {
+        return kidBlockHtml(k, i + 1, add.kids.length > 1);
+      }).join("") + "</div>" +
+      '<div class="btn-row stu-addkid-row">' +
+        '<button type="button" class="btn btn--ghost btn--sm" id="stuAddKid" data-add-act="add-kid">' + Admin.icon("plus") + "Add another child</button>" +
+      "</div>" +
+      '<div id="stuAddErr"></div>' +
+      '<button type="submit" hidden tabindex="-1" aria-hidden="true"></button>' +
+    "</form>";
+  }
+
+  function openAddStudentModal(mode) {
+    if (!Admin.isAdmin()) { Admin.toast("warn", "Only the studio admin can add students."); return; }
+    add = { mode: mode === "existing" ? "existing" : "new", familyId: null, q: "", seq: 0, kids: [] };
+    add.kids.push(blankKid());
+
+    Admin.openModal({
+      title: "Add student",
+      sub: "Create the family and its students — parents can't sign themselves up.",
+      size: "lg",
+      body: '<div class="stu-add" id="stuAdd-body">' + addBodyHtml() + "</div>",
+      actions:
+        '<button type="button" class="btn btn--ghost" data-close>Cancel</button>' +
+        '<button type="button" class="btn btn--primary" id="stuAddSave">Add student</button>',
+      onOpen: bindAdd,
+      onClose: function () { add = null; }
+    });
+  }
+
+  function bindAdd(card) {
+    var root = card.querySelector("#stuAdd-body");
+
+    function repaintKids() {
+      var wrap = root.querySelector("#stuAddKids");
+      var values = readKids();                       // keep what's typed
+      wrap.innerHTML = add.kids.map(function (k, i) { return kidBlockHtml(k, i + 1, add.kids.length > 1); }).join("");
+      writeKids(values);
+    }
+    function readKids() {
+      return add.kids.map(function (k) {
+        var box = root.querySelector('[data-kid="' + k.seq + '"]');
+        if (!box) return { seq: k.seq };
+        return {
+          seq: k.seq,
+          name: box.querySelector('[data-add="name"]').value,
+          age: box.querySelector('[data-add="age"]').value,
+          level: box.querySelector('[data-add="level"]').value,
+          programmes: Array.prototype.map.call(box.querySelectorAll('input[type="checkbox"]:checked'), function (i) { return i.value; })
+        };
+      });
+    }
+    function writeKids(values) {
+      values.forEach(function (v) {
+        var box = root.querySelector('[data-kid="' + v.seq + '"]');
+        if (!box || v.name == null) return;
+        box.querySelector('[data-add="name"]').value = v.name;
+        box.querySelector('[data-add="age"]').value = v.age;
+        box.querySelector('[data-add="level"]').value = v.level;
+        (v.programmes || []).forEach(function (id) {
+          var c = box.querySelector('input[type="checkbox"][value="' + id + '"]');
+          if (c) c.checked = true;
+        });
+      });
+    }
+    function setErr(id, msg, input) {
+      var el = root.querySelector("#" + id);
+      if (el) el.textContent = msg || "";
+      if (input) {
+        input.classList.toggle("invalid", !!msg);
+        if (msg) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
+      }
+    }
+
+    root.addEventListener("click", function (e) {
+      var m = e.target.closest("[data-add-mode]");
+      if (m) {
+        add.mode = m.getAttribute("data-add-mode");
+        add.kids = readKids().map(function (v) { return Object.assign({}, v); });
+        root.querySelectorAll("[data-add-mode]").forEach(function (b) {
+          b.setAttribute("aria-pressed", String(b.getAttribute("data-add-mode") === add.mode));
+        });
+        root.querySelector("#stuAddNew").hidden = add.mode !== "new";
+        root.querySelector("#stuAddExisting").hidden = add.mode !== "existing";
+        focusId(add.mode === "new" ? "stuNewParent" : "stuFamSearch");
+        return;
+      }
+      var act = e.target.closest("[data-add-act]");
+      if (!act) return;
+      if (act.getAttribute("data-add-act") === "add-kid") {
+        add.kids.push(blankKid());
+        repaintKids();
+        focusId("stuNewName-" + add.kids[add.kids.length - 1].seq);
+      } else if (act.getAttribute("data-add-act") === "drop-kid") {
+        var seq = +act.getAttribute("data-kid");
+        var keep = readKids().filter(function (v) { return v.seq !== seq; });
+        add.kids = keep;
+        repaintKids();
+        focusId("stuAddKid");
+      }
+    });
+
+    root.addEventListener("input", function (e) {
+      if (e.target.id === "stuFamSearch") {
+        add.q = e.target.value;
+        add.familyId = null;
+        root.querySelector("#stuFamList").innerHTML = famPickHtml();
+        setErr("stuFamErr", "");
+      } else if (e.target.id === "stuNewParent") { setErr("stuNewParentErr", "", e.target); }
+      else if (e.target.id === "stuNewEmail") { setErr("stuNewEmailErr", "", e.target); }
+      else if (e.target.getAttribute && e.target.getAttribute("data-add") === "name") {
+        setErr("stuNewNameErr-" + e.target.closest("[data-kid]").getAttribute("data-kid"), "", e.target);
+      } else if (e.target.getAttribute && e.target.getAttribute("data-add") === "age") {
+        setErr("stuNewAgeErr-" + e.target.closest("[data-kid]").getAttribute("data-kid"), "", e.target);
+      }
+    });
+
+    root.addEventListener("change", function (e) {
+      if (e.target.name === "stuAddFam") {
+        add.familyId = e.target.value;
+        setErr("stuFamErr", "");
+      }
+    });
+
+    function save(e) {
+      if (e) e.preventDefault();
+      var formErr = root.querySelector("#stuAddErr");
+      formErr.innerHTML = "";
+      var bad = null;
+      var kids = readKids();
+      // a blank extra block is simply ignored
+      kids = kids.filter(function (v, i) { return i === 0 || String(v.name).trim() || String(v.age).trim(); });
+
+      if (add.mode === "new") {
+        var parent = root.querySelector("#stuNewParent");
+        var email = root.querySelector("#stuNewEmail");
+        var pv = parent.value.trim(), ev = email.value.trim();
+        setErr("stuNewParentErr", pv ? "" : "Enter the parent's name.", parent);
+        if (!pv) bad = bad || parent;
+        var emailMsg = !ev ? "Enter the parent's email — they sign in with it."
+          : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ev) ? "Enter a valid email address."
+          : db.familyByEmail(ev) ? "An account with this email already exists." : "";
+        setErr("stuNewEmailErr", emailMsg, email);
+        if (emailMsg) bad = bad || email;
+      } else if (!add.familyId || !db.family(add.familyId)) {
+        setErr("stuFamErr", "Choose the family to add this student to.");
+        bad = bad || root.querySelector("#stuFamSearch");
+      }
+
+      kids.forEach(function (v) {
+        var box = root.querySelector('[data-kid="' + v.seq + '"]');
+        var nameEl = box.querySelector('[data-add="name"]');
+        var ageEl = box.querySelector('[data-add="age"]');
+        setErr("stuNewNameErr-" + v.seq, String(v.name).trim() ? "" : "Enter the student's name.", nameEl);
+        if (!String(v.name).trim()) bad = bad || nameEl;
+        var okAge = ageOk(v.age);
+        setErr("stuNewAgeErr-" + v.seq, okAge ? "" : AGE_ERROR, ageEl);
+        if (!okAge) bad = bad || ageEl;
+      });
+      if (bad) { try { bad.focus(); } catch (err) {} return; }
+
+      var payload = kids.map(function (v) {
+        return {
+          name: String(v.name).trim(),
+          age: String(v.age).trim() === "" ? "" : +v.age,
+          level: v.level,
+          programmes: v.programmes || []
+        };
+      });
+
+      var res, firstId = null, famId = add.familyId, label;
+      if (add.mode === "new") {
+        res = db.createFamily({
+          parentName: root.querySelector("#stuNewParent").value.trim(),
+          email: root.querySelector("#stuNewEmail").value.trim(),
+          phone: root.querySelector("#stuNewPhone").value.trim(),
+          children: payload
+        }, { by: Admin.by() });
+        if (!res.ok) { formErr.innerHTML = h.notice("warn", esc(res.error)); Admin.toast("warn", res.error); return; }
+        famId = res.family.id;
+        firstId = (db.children(famId)[0] || {}).id || null;
+        label = Admin.plural(payload.length, "student") + " added to " + possessive(res.family.parentName) + " new family.";
+      } else {
+        for (var i = 0; i < payload.length; i++) {
+          res = db.addChild(famId, payload[i], { by: Admin.by() });
+          if (!res.ok) { formErr.innerHTML = h.notice("warn", esc(res.error)); Admin.toast("warn", res.error); return; }
+          if (!firstId) firstId = res.child.id;
+        }
+        label = Admin.plural(payload.length, "student") + " added to " + possessive((db.family(famId) || {}).parentName || "the") + " family.";
+      }
+
+      Admin.closeModal();
+      Admin.toast("ok", label);
+      if (firstId) Admin.openStudent(firstId);
+    }
+
+    root.querySelector("#stuAddForm").addEventListener("submit", save);
+    card.querySelector("#stuAddSave").addEventListener("click", save);
+    setTimeout(function () { focusId(add && add.mode === "existing" ? "stuFamSearch" : "stuNewParent"); }, 0);
+  }
+
+  /* ============================================================
      CHILD MODAL — edit (staff) / add to a family (admin)
      opts: { child } | { familyId }
      ============================================================ */
@@ -1568,7 +1881,7 @@
             '<input type="text" id="stuChildName" autocomplete="off" maxlength="80" value="' + esc(data.name) + '" />' +
             '<p class="field-error" id="stuChildNameErr" role="alert"></p></div>' +
           '<div class="field"><label for="stuChildAge">Age <span class="field__opt">(optional)</span></label>' +
-            '<input type="number" id="stuChildAge" inputmode="numeric" min="3" max="99" step="1" value="' + esc(data.age) + '" />' +
+            '<input type="number" id="stuChildAge" inputmode="numeric" min="' + MIN_AGE + '" max="99" step="1" value="' + esc(data.age) + '" />' +
             '<p class="field-error" id="stuChildAgeErr" role="alert"></p></div>' +
         "</div>" +
         '<div class="field"><label for="stuChildLevel">Level</label>' +
@@ -1628,8 +1941,8 @@
           var bad = null;
           setErr(name, "stuChildNameErr", nm ? "" : "Enter the child's name.");
           if (!nm) bad = bad || name;
-          var agOk = ag === "" || (/^\d+$/.test(ag) && +ag >= 3 && +ag <= 99);
-          setErr(age, "stuChildAgeErr", agOk ? "" : "Use a whole number from 3 to 99.");
+          var agOk = ageOk(ag);
+          setErr(age, "stuChildAgeErr", agOk ? "" : AGE_ERROR);
           if (!agOk) bad = bad || age;
           if (bad) { bad.focus(); return; }
           var payload = {

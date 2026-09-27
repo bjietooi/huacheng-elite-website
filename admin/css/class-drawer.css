@@ -65,6 +65,8 @@
 }
 .cd-sum__d { display: block; margin-top: .3rem; font-size: .74rem; color: var(--ink-faint); }
 .cd-sum__d--warn { color: var(--warn); font-weight: 600; }
+.cd-sum__type { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .35rem; }
+.cd-sums--two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 .cd-fill {
   display: block; height: 6px; margin-top: .5rem; border-radius: 100px; overflow: hidden;
@@ -118,6 +120,7 @@
 .cd-sep { color: var(--ink-faint); }
 .cd-stu__phone { display: inline-flex; align-items: center; gap: .4rem; }
 .cd-bal { display: inline-flex; align-items: center; gap: .3rem; color: var(--ink-soft); font-weight: 600; }
+.cd-bal__t { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); }
 .cd-link {
   color: var(--copper-deep); font-weight: 500; font-size: inherit;
   text-decoration: underline; text-decoration-color: rgba(143,85,39,.3); text-underline-offset: 2px;
@@ -210,6 +213,7 @@
   font-size: .9rem; line-height: 1.1;
 }
 .cd-pick__k { font-size: .62rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
+.cd-pick__bal--low .cred { color: var(--warn); }
 .cd-assign__charge { margin-top: .9rem; }
 .cd-assign__charge input:disabled { cursor: not-allowed; opacity: .7; }
 .cd-assign__after { display: inline-flex; align-items: center; gap: .3rem; margin-left: .2rem; white-space: nowrap; }

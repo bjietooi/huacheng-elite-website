@@ -12,8 +12,9 @@
    family's credits is listed in Students.
 
    Exposes:
-     Admin.adjustCreditsModal(familyId?, mode?)   mode: "deduct" | "add"
-     (a child id is accepted too and resolves to that child's family)
+     Admin.adjustCreditsModal(familyId?, mode?, creditType?)
+       mode: "deduct" | "add"; a child id resolves to that child's family;
+       creditType preselects a wallet (otherwise the family's main one)
    ============================================================ */
 (function () {
   "use strict";
@@ -329,6 +330,37 @@
       '<p class="field-error form-error" id="adjFamilyErr"></p>';
   }
 
+  // the wallet a change most likely belongs to: the biggest balance the family holds
+  function mainWallet(familyId) {
+    var list = db.balances(familyId) || [];
+    var best = null;
+    list.forEach(function (w) { if (!best || w.credits > best.credits) best = w; });
+    if (best && best.credits > 0) return best.type.id;
+    if (list.length) return list[0].type.id;
+    var types = db.creditTypes();
+    return types.length ? types[0].id : "";
+  }
+
+  function typePickerHtml(st) {
+    var list = st.familyId ? db.balances(st.familyId) : [];
+    var held = list.filter(function (w) { return w.credits; });
+    var opts = db.creditTypes().map(function (t) {
+      var w = null;
+      list.forEach(function (x) { if (x.type.id === t.id) w = x; });
+      var bal = st.familyId ? (w ? w.credits : db.balance(st.familyId, t.id)) : null;
+      return { value: t.id, label: t.name + (bal == null ? "" : " — " + credits(bal)) };
+    });
+    return '<label class="field__label" for="adjCreditType">Which credits</label>' +
+      (st.familyId
+        ? '<p class="adj-wallets">' + (held.length ? "This family holds " + h.wallets(held) : '<span class="muted">This family holds no credits yet</span>') + "</p>"
+        : "") +
+      '<select id="adjCreditType" aria-describedby="adjTypeHint adjTypeErr">' +
+        '<option value="">Choose which credits…</option>' + h.options(opts, st.creditType) +
+      "</select>" +
+      '<p class="field__hint" id="adjTypeHint">A credit only books its own kind of class.</p>' +
+      '<p class="field-error form-error" id="adjTypeErr"></p>';
+  }
+
   function summaryHtml(familyId) {
     var f = db.family(familyId);
     var kids = db.children(f.id);
@@ -341,7 +373,7 @@
           "</div>" +
           '<div class="person__sub">' + esc(kidsLine(kids)) + "</div>" +
         "</div>" +
-        '<span class="adj-fam__bal"><span class="adj-fam__k">Family credits</span>' + h.credits(db.balance(f.id)) + "</span>" +
+        '<span class="adj-fam__bal"><span class="adj-fam__k">All credits</span>' + h.credits(db.balance(f.id)) + "</span>" +
         '<button class="btn btn--quiet btn--xs" type="button" id="adjChange">Change<span class="sr-only"> family</span></button>' +
       "</div>";
   }
@@ -390,6 +422,7 @@
   function modalBody(st) {
     return '<form class="adj" id="adjForm" novalidate>' +
       '<div class="field" id="adjFamily"></div>' +
+      '<div class="field" id="adjType"></div>' +
       '<div class="field">' +
         '<span class="field__label" id="adjModeLabel">Deduct or add</span>' +
         '<div class="seg adj-mode" role="group" aria-labelledby="adjModeLabel">' +
@@ -441,6 +474,7 @@
   function wireModal(card, st) {
     var form = card.querySelector("#adjForm");
     var famBox = form.querySelector("#adjFamily");
+    var typeBox = form.querySelector("#adjType");
     var credits_ = form.querySelector("#adjCredits");
     var reason = form.querySelector("#adjReason");
     var note = form.querySelector("#adjNote");
@@ -451,6 +485,8 @@
     var submit = card.querySelector("#adjSubmit");
 
     function fam() { return st.familyId ? db.family(st.familyId) : null; }
+    function typeOk() { return !!st.creditType && !!db.creditType(st.creditType); }
+    function walletBalance() { return st.familyId && typeOk() ? db.balance(st.familyId, st.creditType) : 0; }
     function count() {
       var v = String(credits_.value).trim();
       return /^\d+$/.test(v) ? parseInt(v, 10) : NaN;
@@ -459,7 +495,11 @@
     function isPaid() { return st.mode === "add" && reason.value === PAID_REASON; }
     function needsNote() { return NOTE_REQUIRED.indexOf(reason.value) >= 0; }
     function goesNegative() {
-      return st.mode === "deduct" && !!st.familyId && countOk() && db.balance(st.familyId) - count() < 0;
+      return st.mode === "deduct" && !!st.familyId && typeOk() && countOk() && walletBalance() - count() < 0;
+    }
+
+    function paintTypes() {
+      typeBox.innerHTML = typePickerHtml(st);
     }
 
     function paintFamily() {
@@ -487,12 +527,12 @@
         box.innerHTML = '<span class="adj-preview__k">Family credits</span><span class="soft">Choose a family to preview the change.</span>';
         return;
       }
-      var bal = db.balance(f.id);
-      var ok = countOk();
+      var bal = walletBalance();
+      var ok = countOk() && typeOk();
       var delta = ok ? (st.mode === "deduct" ? -count() : count()) : 0;
       var next = bal + delta;
       box.innerHTML =
-        '<span class="adj-preview__k">' + esc(famLabel(f)) + "</span>" +
+        '<span class="adj-preview__k">' + esc(famLabel(f)) + (typeOk() ? " · " + esc(typeShort(st.creditType)) : "") + "</span>" +
         '<b class="adj-preview__n' + (bal < 0 ? " is-neg" : "") + '">' + num(bal) + "</b>" +
         '<span class="adj-preview__arrow" aria-hidden="true">→</span><span class="sr-only"> becomes </span>' +
         '<b class="adj-preview__n' + (ok && next < 0 ? " is-neg" : "") + (ok ? "" : " is-pending") + '">' + (ok ? num(next) : "?") + "</b>" +
@@ -504,25 +544,25 @@
       negBox.hidden = !neg;
       if (!neg) { allowNeg.checked = false; return; }
       var f = fam();
-      var bal = db.balance(f.id);
+      var short = typeShort(st.creditType);
+      var bal = walletBalance();
       var next = bal - count();
       form.querySelector("#adjNegText").innerHTML =
-        "<p><strong>" + esc(famLabel(f)) + "</strong> has " + esc(num(bal) + (Math.abs(bal) === 1 ? " credit" : " credits")) +
-        ". Deducting " + count() + " leaves the family at <strong>" + num(next) +
-        "</strong> — they’ll owe " + esc(credits(-next)) + " until they top up.</p>";
+        "<p><strong>" + esc(famLabel(f)) + "</strong> has " + esc(num(bal) + " " + short + (Math.abs(bal) === 1 ? " credit" : " credits")) +
+        ". Deducting " + count() + " leaves their " + esc(short) + " credits at <strong>" + num(next) +
+        "</strong> — they’ll owe " + esc(walletWords(st.creditType, -next)) + " until they top up.</p>";
     }
 
     function paintAmountHint() {
       var hint = form.querySelector("#adjAmountHint");
-      var f = fam();
       var k = count();
-      // package rates for the levels this family's children train at
-      var packs = f && countOk() ? (db.packagesFor(f.id) || []).filter(function (p) {
-        return p.id !== "trial" && p.suggested && p.price > 0 && p.credits === k;
+      // what this wallet's credits sell for
+      var packs = typeOk() && countOk() ? db.packages({ creditType: st.creditType }).filter(function (p) {
+        return !p.trial && p.price > 0 && p.credits === k;
       }) : [];
       if (packs.length) {
-        hint.textContent = k + "-credit package: " + packs.map(function (p) {
-          return p.tierLabel + " " + fmt.money(p.price);
+        hint.textContent = packs.map(function (p) {
+          return p.name + " (" + db.creditTypeName(st.creditType) + ") is " + fmt.money(p.price);
         }).join(" · ") + ".";
       } else {
         hint.textContent = "Record what the family paid so the credit value report stays accurate.";
@@ -531,12 +571,20 @@
 
     function paintNoteHint() {
       var f = fam();
-      form.querySelector("#adjNoteHintText").textContent = f
+      var hintEl = form.querySelector("#adjNoteHintText");
+      if (!hintEl) return;
+      hintEl.textContent = f
         ? f.parentName + " sees this note in the family credit history — keep internal remarks out of it."
         : "Parents see this note in their family credit history — keep internal remarks out of it.";
     }
 
+    function syncTypeSelect() {
+      var sel = form.querySelector("#adjCreditType");
+      if (sel && sel.value !== st.creditType) sel.value = st.creditType || "";
+    }
+
     function update() {
+      syncTypeSelect();
       form.querySelectorAll("[data-adj-mode]").forEach(function (b) {
         b.setAttribute("aria-pressed", String(b.getAttribute("data-adj-mode") === st.mode));
       });
@@ -566,6 +614,7 @@
       }
       var search = form.querySelector("#adjFamilySearch");
       mark(search, "adjFamilyErr", st.familyId ? "" : "Choose a family.");
+      mark(form.querySelector("#adjCreditType"), "adjTypeErr", typeOk() ? "" : "Choose which credits to change.");
       mark(credits_, "adjCreditsErr", countOk() ? "" : "Enter a whole number from 1 to " + MAX_CREDITS + ".");
       mark(reason, "adjReasonErr", reason.value ? "" : "Choose a reason.");
       if (isPaid()) {
@@ -594,6 +643,7 @@
       var f = fam();
       var res = db.adjustCredits(f.id, delta, {
         by: Admin.by(),
+        creditType: st.creditType,
         reason: reason.value,
         note: note.value.trim(),
         amount: isPaid() ? Math.round(parseFloat(amount.value) * 100) / 100 : 0,
@@ -607,8 +657,8 @@
         if (Admin.currentView && Admin.currentView() === "credits") ui.reveal = true;
         var b = res.balance;
         msg = delta < 0
-          ? "Deducted " + credits(k) + " from " + famLabel(f) + " — " + (b < 0 ? "now owes " + (-b) : b + " left")
-          : "Added " + credits(k) + " to " + famLabel(f) + " — " + (b < 0 ? "still owes " + (-b) : "now has " + b);
+          ? "Deducted " + walletWords(st.creditType, k) + " from " + famLabel(f) + " — " + (b < 0 ? "now owes " + (-b) : b + " left")
+          : "Added " + walletWords(st.creditType, k) + " to " + famLabel(f) + " — " + (b < 0 ? "still owes " + (-b) : "now has " + b);
       }
       if (Admin.check(res, msg)) {
         Admin.closeModal();
@@ -628,6 +678,8 @@
       if (radios.length === 1) {
         radios[0].checked = true;
         st.familyId = radios[0].value;
+        st.creditType = mainWallet(st.familyId);
+        paintTypes();
         update();
       }
     });
@@ -646,7 +698,12 @@
 
     form.addEventListener("change", function (e) {
       var t = e.target;
-      if (t.name === "adjFamily") { st.familyId = t.value; update(); }
+      if (t.name === "adjFamily") {
+        st.familyId = t.value;
+        st.creditType = mainWallet(st.familyId);
+        paintTypes();
+        update();
+      } else if (t.id === "adjCreditType") { st.creditType = t.value; update(); }
       else if (t.id === "adjReason") update();
       else if (st.tried) validate();
     });
@@ -673,6 +730,7 @@
         st.picking = true;
         st.q = "";
         paintFamily();
+        paintTypes();
         update();
         var s = form.querySelector("#adjFamilySearch");
         if (s) { try { s.focus(); } catch (err) {} }
@@ -680,11 +738,12 @@
     });
 
     paintFamily();
+    paintTypes();
     paintReasons();
     update();
   }
 
-  Admin.adjustCreditsModal = function (familyId, mode) {
+  Admin.adjustCreditsModal = function (familyId, mode, creditType) {
     if (!Admin.can("credits")) {
       Admin.toast("warn", "Only the studio admin can adjust credits.");
       return;
@@ -692,6 +751,7 @@
     var fid = resolveFamily(familyId);
     var st = {
       familyId: fid,
+      creditType: creditType && db.creditType(creditType) ? creditType : (fid ? mainWallet(fid) : ""),
       picking: !fid,
       q: "",
       mode: mode === "add" ? "add" : "deduct",
@@ -699,7 +759,7 @@
     };
     Admin.openModal({
       title: "Adjust credits",
-      sub: "Changes one family’s shared credits. Logged with your name and shown in their family credit history.",
+      sub: "Changes one wallet of one family’s shared credits. Logged with your name and shown in their family credit history.",
       body: modalBody(st),
       actions:
         '<button class="btn btn--ghost" type="button" data-close>Cancel</button>' +

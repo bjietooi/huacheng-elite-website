@@ -125,6 +125,14 @@
     return '<span class="sch-t">' + esc(a) + " –</span> " + '<span class="sch-t">' + esc(b) + "</span>";
   }
 
+  // "4 – 6 PM" — the same compact style as the cards' time ranges
+  function compactTimes(from, to) {
+    var a = fmt.time(from).replace(":00 ", " ");
+    var b = fmt.time(to).replace(":00 ", " ");
+    if (a.slice(-2) === b.slice(-2)) a = a.slice(0, -3);
+    return a + " – " + b;
+  }
+
   function fillState(occ) {
     if (occ.spotsLeft <= 0) return "full";
     if (occ.spotsLeft <= Math.max(2, Math.ceil(occ.capacity * 0.2))) return "nearly";
@@ -170,7 +178,7 @@
       out.push(h.chip("Cover for " + occ.originalCoach, "sub",
         who(occ.coach) === "You" ? "You're covering this date" : occ.coach + " is covering this date"));
     }
-    if (occ.status === "open" && occ.spotsLeft === 0 && !occ.ended) out.push(h.chip("Full", "warn"));
+    if (occ.status === "open" && occ.spotsLeft === 0 && !occ.ended && !isPrivate(occ)) out.push(h.chip("Full", "warn"));
     return out.join("");
   }
 
@@ -567,8 +575,8 @@
       var you = who(l.coach) === "You";
       var when = db.leaveLabel(l);
       var part = l.allDay === false || (l.from && l.to);
-      return h.chip((you ? "You're on leave" : l.coach + " on leave") + (part ? " · " + when : ""), "leave",
-        (l.reason ? l.reason + " · " : "") + when);
+      return h.chip((you ? "You're on leave" : l.coach + " on leave") + (part ? " · " + compactTimes(l.from, l.to) : ""),
+        "leave", (l.reason ? l.reason + " · " : "") + when);
     }).join("") + "</div>";
   }
 
@@ -1815,7 +1823,7 @@
   }
 
   function capHint(p) {
-    return "Up to " + p.maxSize + " students";
+    return isPrivateProgramme(p) ? "One student — a one-to-one session." : "Up to " + p.maxSize + " students";
   }
 
   // "Several dates (camp)"
@@ -2013,10 +2021,10 @@
               if (d.date === today() && start <= nowMin()) {
                 out.push(h.notice("warn", "<p><strong>That time has already passed today.</strong> Pick a later start time.</p>"));
               }
-              var lv = db.leaveFor(d.coach, d.date);
+              var lv = db.leaveFor(d.coach, d.date, d.time, d.duration);
               if (lv) {
-                out.push(h.notice("warn", "<p><strong>" + esc(d.coach) + " is on leave that day.</strong> " +
-                  "The class would stay closed to bookings until the leave is cancelled.</p>"));
+                out.push(h.notice("warn", "<p><strong>" + esc(d.coach) + " is on leave then</strong> (" +
+                  esc(db.leaveLabel(lv)) + "). The class would stay closed to bookings until the leave is cancelled.</p>"));
               }
               var cl = openClashes(d.date, d.time, d.duration, d.coach);
               if (cl.length) {
@@ -2077,7 +2085,7 @@
           p.past.forEach(function (x) { pastSet[x] = 1; });
           var clashDates = [], leaveDates = [];
           p.valid.slice(0, 120).forEach(function (x) {
-            if (db.leaveFor(d.coach, x)) { leaveSet[x] = 1; leaveDates.push(x); }
+            if (db.leaveFor(d.coach, x, d.time, d.duration)) { leaveSet[x] = 1; leaveDates.push(x); }
             var cl = openClashes(x, d.time, d.duration, d.coach);
             if (cl.length) { clashMap[x] = cl; clashDates.push(x); }
           });
@@ -2141,6 +2149,8 @@
         }
 
         function paint() {
+          var pay = card.querySelector("#schOoPay");
+          if (pay) pay.innerHTML = payLine(progEl.value, coachEl.value);
           if (mode === "many") paintMany(); else paintOne();
           var label = "Add class";
           if (mode === "many") {
@@ -2287,11 +2297,13 @@
           durEl.innerHTML = durationOptions(p.duration || 60);
           capEl.value = p.maxSize;
           capEl.max = p.maxSize;
+          capEl.disabled = isPrivateProgramme(p);   // one-to-one: always one place
           card.querySelector("#schOoCapHint").textContent = capHint(p);
           clear("schOoCap");
           clear("schOoDur");
           paint();
         });
+        capEl.disabled = isPrivateProgramme(prog);
         paintRanges();
         if (prefill.groupName) nameEl.value = String(prefill.groupName);
         if (prefill.mode === "many") setMode("many");

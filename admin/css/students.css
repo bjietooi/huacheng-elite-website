@@ -1,6 +1,6 @@
 /* ============================================================
    Students (admin/js/students.js) — prefix: stu-
-   The student list (with each family's shared credits and status),
+   The student list (with each family's typed credit wallets and status),
    student profile drawer, note / child modals and the staff
    "book a child" modal. Builds on the shared table,
    card, chip, .att, .choice and .rate-pick components in
@@ -99,7 +99,13 @@
 .stu-table .cred { justify-content: flex-end; }
 .stu-unut { font-weight: 700; color: var(--ink); }
 .stu-cred-sub { white-space: nowrap; }
-.stu-cred-sub.is-shared { max-width: 130px; margin-left: auto; overflow: hidden; text-overflow: ellipsis; color: var(--copper-deep); }
+.stu-cred-sub.is-shared { max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--copper-deep); }
+/* typed wallets: one chip per credit type the family holds */
+.stu-c-cred { min-width: 130px; }
+.stu-c-cred .chips { justify-content: flex-start; gap: .25rem; max-width: 190px; }
+.stu-c-cred .cell-sub { margin-top: .25rem; }
+.chip--credit b { font-weight: 800; font-variant-numeric: lining-nums tabular-nums; }
+.stu-sum__types { display: flex; flex-wrap: wrap; gap: .3rem; margin: -.4rem 0 .9rem; }
 .stu-table tr.is-dormant td:first-child { box-shadow: inset 3px 0 0 rgba(184,69,47,.55); }
 .stu-c-who { min-width: 180px; }
 .stu-c-who .stu-person { max-width: 205px; }
@@ -223,6 +229,17 @@ th[aria-sort="ascending"] .stu-sort .ic { transform: rotate(180deg); }
 .stu-credit__who { margin-top: .3rem; font-size: .8rem; color: rgba(237,234,225,.75); }
 .stu-credit__warn { margin-top: .3rem; font-size: .8rem; font-weight: 600; color: #f0a08e; }
 .stu-credit__hint { margin-top: .3rem; font-size: .76rem; color: rgba(237,234,225,.6); }
+.stu-wallets { display: grid; gap: .35rem; margin-top: .8rem; }
+.stu-wallet {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .35rem .5rem .35rem .4rem; border-radius: 10px; background: rgba(237,234,225,.07);
+}
+.stu-wallet__n { font-weight: 700; font-size: 1.05rem; color: var(--cream); font-variant-numeric: lining-nums tabular-nums; margin-left: auto; }
+.stu-wallet__u { font-size: .74rem; color: rgba(237,234,225,.6); }
+.stu-wallet.is-zero .stu-wallet__n { color: rgba(237,234,225,.55); }
+.stu-wallet.is-neg .stu-wallet__n { color: #f0a08e; }
+.stu-wallet__adj { color: var(--copper-soft); padding-inline: .5rem; }
+.stu-wallet__adj:hover:not(:disabled) { background: rgba(199,148,102,.16); }
 .stu-credit__facts { display: grid; gap: .45rem; margin: 0; padding-left: 1.2rem; border-left: 1px solid rgba(237,234,225,.14); min-width: 0; }
 .stu-credit__facts dt { font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgba(237,234,225,.55); }
 .stu-credit__facts dd { font-size: .88rem; font-weight: 500; color: var(--cream); overflow-wrap: anywhere; font-variant-numeric: lining-nums tabular-nums; }
@@ -342,6 +359,8 @@ th[aria-sort="ascending"] .stu-sort .ic { transform: rotate(180deg); }
 .stu-ledger__when { display: none; }
 .stu-ledger__what { font-weight: 500; }
 .stu-ledger__kid { margin-right: .4rem; vertical-align: 1px; }
+.stu-ledger__typecell { white-space: nowrap; }
+.stu-ledger__type { min-width: 150px; }
 .stu-ledger-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; margin-bottom: .7rem; }
 .stu-ledger-bar .seg button { display: inline-flex; align-items: center; gap: .4rem; }
 .stu-hint--inline { margin: 0; flex: 1 1 220px; }
@@ -428,6 +447,8 @@ th[aria-sort="ascending"] .stu-sort .ic { transform: rotate(180deg); }
 .stu-choice .choice__t { overflow-wrap: anywhere; }
 .stu-choice__chips { display: flex; margin-top: .4rem; }
 .stu-choice.is-booked { background: transparent; border-style: dashed; }
+.stu-choice.is-short:not(:has(input:checked)) { border-color: rgba(184,69,47,.35); }
+.stu-choice.is-short .choice__t { color: var(--ink); }
 
 .stu-book__opts { display: grid; gap: .65rem; margin-top: 1rem; scroll-margin-bottom: 5.5rem; }
 .stu-book__opts > * { margin-top: 0 !important; }
@@ -449,6 +470,30 @@ th[aria-sort="ascending"] .stu-sort .ic { transform: rotate(180deg); }
 }
 .stu-must input { accent-color: var(--warn); }
 .stu-must.is-invalid { border-style: solid; border-color: var(--warn); box-shadow: 0 0 0 3px rgba(184,69,47,.12); }
+
+/* ============================================================
+   ADD STUDENT (admin)
+   ============================================================ */
+.stu-addmode { display: flex; width: 100%; margin-bottom: 1rem; }
+.stu-addmode button { flex: 1; }
+.stu-add .notice { margin-bottom: .9rem; }
+.stu-add .field + .field, .stu-add .field-row { margin-top: .9rem; }
+.stu-kidblock {
+  margin-top: 1.1rem; padding: .9rem 1rem 1rem; min-width: 0;
+  border: 1.5px solid var(--line); border-radius: var(--radius); background: var(--white);
+}
+.stu-kidblock__t {
+  display: flex; align-items: center; justify-content: space-between; gap: .5rem; width: 100%;
+  padding: 0 0 .2rem; font-size: .7rem; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--copper-deep);
+}
+.stu-kidblock .field-row { margin-top: .4rem; }
+.stu-addkid-row { margin-top: .9rem; }
+.stu-fampick { display: grid; gap: .4rem; margin-top: .5rem; max-height: 260px; overflow-y: auto; overscroll-behavior: contain; }
+.stu-fam-choice { padding: .6rem .75rem; }
+.stu-fampick__more { margin: .5rem 0 0; }
+#stuAddErr:empty { display: none; }
+#stuAddErr { margin-top: .9rem; }
 
 /* ============================================================
    RESPONSIVE
@@ -554,6 +599,8 @@ th[aria-sort="ascending"] .stu-sort .ic { transform: rotate(180deg); }
 
   .stu-note__vis { margin-left: 0; }
   .stu-progs { grid-template-columns: minmax(0, 1fr); }
+  .stu-addmode { flex-direction: column; border-radius: 14px; }
+  .stu-ledger__type { min-width: 0; width: 100%; }
   .stu-book__bar .seg { width: 100%; }
   .stu-book__bar .seg button { flex: 1; padding-inline: .5rem; }
 }

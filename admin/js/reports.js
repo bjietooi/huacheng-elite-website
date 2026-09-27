@@ -31,10 +31,19 @@
   var THRESHOLDS = [14, 21, 30, 60];
   var TOP_N = 12;
 
+  // date-range presets — each returns { from, to } ending today
+  var PRESETS = [
+    { id: "month", label: "This month", from: function (t) { return t.slice(0, 8) + "01"; } },
+    { id: "30",    label: "Last 30 days", from: function (t) { return db.addDays(t, -29); } },
+    { id: "90",    label: "Last 3 months", from: function (t) { return db.addDays(t, -89); } },
+    { id: "year",  label: "This year", from: function (t) { return t.slice(0, 4) + "-01-01"; } }
+  ];
+
   /* ---------- view state (survives re-renders) ---------- */
+  // the date range lives in the URL (?from=&to=) so a refresh keeps it
   var ui = {
     dormant: 21,
-    view: { top: "chart", idle: "chart" }
+    view: { top: "chart", idle: "chart", type: "chart" }
   };
 
   // tooltip payloads for the current render, keyed by data-tip
@@ -50,6 +59,35 @@
   function defaultRate() {
     var j = db.tierPacks && db.tierPacks.junior;
     return j && j[10] ? j[10] / 10 : 42.5;
+  }
+
+  /* ---------- date range ---------- */
+  var ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+  // params → a valid { from, to, preset } (to never past today, from never past to)
+  function range(params) {
+    var today = db.todayISO();
+    var to = ISO.test(params.to || "") && params.to <= today ? params.to : today;
+    var from = ISO.test(params.from || "") && params.from <= to ? params.from : null;
+    if (!from) from = PRESETS[0].from(to);
+    var preset = null;
+    if (to === today) {
+      PRESETS.forEach(function (p) { if (!preset && p.from(today) === from) preset = p.id; });
+    }
+    return { from: from, to: to, preset: preset };
+  }
+
+  // "27 Sep 2026"
+  function dayYear(iso) { return fmt.date(iso, "day") + " " + iso.slice(0, 4); }
+
+  // "1–27 Sep 2026" · "29 Aug – 27 Sep 2026" · "27 Sep 2026"
+  function rangeLabel(from, to) {
+    if (from === to) return dayYear(to);
+    var a = fmt.date(from, "day"), b = fmt.date(to, "day");           // "1 Sep"
+    var year = to.slice(0, 4);
+    if (from.slice(0, 4) !== year) return dayYear(from) + " – " + dayYear(to);
+    if (from.slice(5, 7) === to.slice(5, 7)) return a.split(" ")[0] + "–" + b + " " + year;
+    return a + " – " + b + " " + year;
   }
 
   function firstName(name) { return String(name || "").trim().split(/\s+/)[0] || ""; }
@@ -114,6 +152,33 @@
   /* ============================================================
      HEAD + KPIs
      ============================================================ */
+  function rangeHtml(rep, rng) {
+    var today = db.todayISO();
+    var presets = PRESETS.map(function (p) {
+      return '<button type="button" id="repRange-' + p.id + '" data-rep-range="' + p.id + '" aria-pressed="' +
+        (rng.preset === p.id) + '">' + esc(p.label) + "</button>";
+    }).join("");
+    return '<section class="rep-range" aria-labelledby="repRangeTitle">' +
+        '<div class="rep-range__top">' +
+          '<h2 class="rep-range__t" id="repRangeTitle">' + Admin.icon("calendar") + "Period</h2>" +
+          '<div class="seg rep-range__seg" role="group" aria-label="Date range presets">' + presets + "</div>" +
+          '<div class="rep-range__dates">' +
+            '<label class="rep-range__f" for="repFrom"><span>From</span>' +
+              '<input class="input" type="date" id="repFrom" value="' + esc(rng.from) + '" max="' + esc(rng.to) + '" />' +
+            "</label>" +
+            '<label class="rep-range__f" for="repTo"><span>To</span>' +
+              '<input class="input" type="date" id="repTo" value="' + esc(rng.to) + '" min="' + esc(rng.from) + '" max="' + esc(today) + '" />' +
+            "</label>" +
+            (rng.preset === "month" && rng.to === today ? "" :
+              '<button class="btn btn--quiet btn--sm" type="button" id="repRangeReset">Reset</button>') +
+          "</div>" +
+        "</div>" +
+        '<p class="rep-range__d" id="repRangeLabel">Showing <strong>' + esc(rangeLabel(rng.from, rng.to)) + "</strong>" +
+          " · balances as at " + esc(dayYear(rng.to)) +
+          (rng.to === today ? "" : " (not today)") + "</p>" +
+      "</section>";
+  }
+
   function headHtml(rep) {
     var thresh = '<label class="rep-thresh" for="repDormant" title="A family is dormant when it holds available credits, has nothing booked and none of its children has attended a class for longer than this.">' +
         '<span class="rep-thresh__k">Dormant after</span>' +
@@ -122,9 +187,9 @@
         "</select>" +
       "</label>";
     return h.pageHead({
-      eyebrow: "As of " + fmt.date(rep.asOf, "long"),
-      title: "Unutilised credits",
-      sub: "Credits families have paid for or been given but haven’t used yet — the lessons the studio still owes.",
+      eyebrow: "As at " + fmt.date(rep.to, "long"),
+      title: "Credits report",
+      sub: "What families are still owed in lessons, and what moved in the period you pick.",
       actions: thresh +
         '<button class="btn btn--ghost" type="button" id="repPrint">Print</button>' +
         '<button class="btn btn--primary" type="button" id="repExport">' + Admin.icon("download") + "Export CSV</button>"
@@ -145,9 +210,9 @@
       ? "<span>" + esc(Admin.plural(t.dormantCredits, "credit")) + " idle · no class in " + ui.dormant + "+ days</span>" +
         studentsLink("Show", "dormant", "rep-kpi-link", ' id="repDormantLink"')
       : "No one idle for " + ui.dormant + "+ days";
-    var out = '<section class="stats rep-kpis" aria-label="Summary">' +
+    var out = '<section class="stats rep-kpis" aria-label="Summary as at ' + esc(fmt.date(rep.to, "long")) + '">' +
         stat("Total unutilised", t.unutilised, t.unutilised === 1 ? "credit" : "credits",
-          "≈ " + esc(fmt.money(t.estValue)) + " est. value", "stat--ink") +
+          "≈ " + esc(fmt.money(t.estValue)) + " est. value · as at " + esc(fmt.date(rep.to, "day")), "stat--ink") +
         stat("Available", t.available, t.available === 1 ? "credit" : "credits", "In family pools, not booked") +
         stat("Reserved", t.reserved, t.reserved === 1 ? "credit" : "credits", "Booked for classes not yet held") +
         stat("Families holding credits", t.familiesWithCredits, "of " + t.families,
@@ -161,7 +226,9 @@
         "<strong>Reserved</strong> credits are booked for classes that haven’t happened yet. " +
         "<strong>Unutilised</strong> = available + reserved. " +
         "Value = unutilised credits × that family’s average paid price per credit (" +
-        esc(money2(defaultRate())) + ", the Junior 10-pack rate, where nothing has been paid yet)." +
+        esc(money2(defaultRate())) + ", the Junior 10-pack rate, where nothing has been paid yet). " +
+        "Every credit has a <strong>type</strong> — Junior, Elite, Competitive or a coach’s private sessions — and only books that kind of class. " +
+        "Balances are as at <strong>" + esc(fmt.date(rep.to, "long")) + "</strong>; what was bought, used and earned is inside the period above." +
       "</p>";
     if (t.negativeFamilies) {
       out += h.notice("warn",
@@ -312,10 +379,121 @@
   }
 
   /* ============================================================
-     THIS MONTH — credit movement
+     CREDITS BY TYPE — what is held, and what moved in the period
+     One series per panel, so every bar wears the same colour and
+     is direct-labelled with its credit type.
+     ============================================================ */
+  function typeChartHtml(rep) {
+    var held = (rep.totals.byType || []).slice();
+    var m = rep.movement;
+    var moved = db.creditTypes().map(function (ty) {
+      var x = (m.byType && m.byType[ty.id]) || { in: 0, out: 0, revenue: 0 };
+      return { type: ty, bought: x.in, used: x.out, revenue: x.revenue || 0 };
+    }).filter(function (x) { return x.bought || x.used; })
+      .sort(function (a, b) { return (b.bought + b.used) - (a.bought + a.used); });
+    var total = held.reduce(function (n, x) { return n + x.credits; }, 0);
+    var maxMove = moved.reduce(function (n, x) { return Math.max(n, x.bought, x.used); }, 1);
+    var body;
+
+    if (ui.view.type === "table") {
+      body = '<div class="tbl-wrap"><table class="tbl rep-mini">' +
+          '<caption class="sr-only">Unutilised credits, and credits bought and used in the period, by credit type</caption>' +
+          '<thead><tr><th scope="col">Credit type</th><th scope="col" class="num">Held</th>' +
+          '<th scope="col" class="num">Bought</th><th scope="col" class="num">Used</th><th scope="col" class="num">Revenue</th></tr></thead><tbody>' +
+          db.creditTypes().map(function (ty) {
+            var heldN = 0;
+            held.forEach(function (x) { if (x.type.id === ty.id) heldN = x.credits; });
+            var mv = null;
+            moved.forEach(function (x) { if (x.type.id === ty.id) mv = x; });
+            if (!heldN && !mv) return "";
+            return "<tr><td>" + h.creditChip(ty.id) + '</td><td class="num">' + heldN +
+              '</td><td class="num">' + (mv ? mv.bought : 0) + '</td><td class="num">' + (mv ? mv.used : 0) +
+              '</td><td class="num">' + esc(fmt.money(mv ? mv.revenue : 0)) + "</td></tr>";
+          }).join("") +
+        "</tbody></table></div>";
+    } else if (!held.length && !moved.length) {
+      body = h.empty("chart", "No credits to show", "Nothing has been bought or used in this period.");
+    } else {
+      var maxHeld = held.length ? held[0].credits : 1;
+      var heldSummary = "Bar chart of unutilised credits by credit type: " +
+        (held.length ? held.map(function (x) { return x.type.name + ", " + Admin.plural(x.credits, "credit"); }).join("; ") : "none") + ".";
+      var heldBars = held.length
+        ? '<div class="rep-tbars" role="img" aria-label="' + esc(heldSummary) + '">' +
+          held.map(function (x, i) {
+            var key = "type" + i;
+            tips[key] = {
+              title: x.type.name,
+              sub: "Unutilised credits",
+              rows: [
+                { value: String(x.credits), label: "credits held", strong: true, key: "avail" },
+                { value: total ? Math.round((x.credits / total) * 100) + "%" : "0%", label: "of all credits" }
+              ]
+            };
+            return '<div class="rep-tbar" data-tip="' + key + '" style="--i:' + i + '">' +
+                '<span class="rep-tbar__label">' + h.creditChip(x.type.id) + "</span>" +
+                '<span class="rep-hbar__track">' +
+                  '<span class="rep-hbar__bar rep-tbar__bar" style="--p:' + (x.credits / maxHeld).toFixed(4) + '"></span>' +
+                  '<span class="rep-hbar__val">' + x.credits + "</span>" +
+                "</span>" +
+              "</div>";
+          }).join("") + "</div>"
+        : '<p class="rep-note">No unutilised credits.</p>';
+
+      var moveSummary = "Bought against used in this period, by credit type: " +
+        (moved.length ? moved.map(function (x) {
+          return x.type.name + ", " + x.bought + " bought, " + x.used + " used";
+        }).join("; ") : "nothing moved") + ".";
+      var moveBars = moved.length
+        ? '<div class="legend rep-legend" aria-hidden="true">' +
+            '<span><i class="rep-key rep-key--avail"></i>Bought</span>' +
+            '<span><i class="rep-key rep-key--res"></i>Used</span>' +
+          "</div>" +
+          '<div class="rep-tbars rep-tbars--pair" role="img" aria-label="' + esc(moveSummary) + '">' +
+          moved.map(function (x, i) {
+            var key = "move" + i;
+            tips[key] = {
+              title: x.type.name,
+              sub: "In this period",
+              rows: [
+                { value: String(x.bought), label: "bought", key: "avail" },
+                { value: String(x.used), label: "used", key: "res" },
+                { value: fmt.money(x.revenue), label: "revenue" }
+              ]
+            };
+            return '<div class="rep-tbar rep-tbar--pair" data-tip="' + key + '" style="--i:' + i + '">' +
+                '<span class="rep-tbar__label">' + h.creditChip(x.type.id) + "</span>" +
+                '<span class="rep-tbar__pair">' +
+                  '<span class="rep-hbar__track"><span class="rep-hbar__bar rep-tbar__bar rep-tbar__bar--in" style="--p:' +
+                    (x.bought / maxMove).toFixed(4) + '"></span><span class="rep-hbar__val">' + x.bought + "</span></span>" +
+                  '<span class="rep-hbar__track"><span class="rep-hbar__bar rep-tbar__bar rep-tbar__bar--out" style="--p:' +
+                    (x.used / maxMove).toFixed(4) + '"></span><span class="rep-hbar__val">' + x.used + "</span></span>" +
+                "</span>" +
+              "</div>";
+          }).join("") + "</div>"
+        : '<p class="rep-note">Nothing was bought or used in this period.</p>';
+
+      body = '<div class="rep-typegrid">' +
+          '<div class="rep-typecol"><h3 class="rep-subhead">Unutilised credits held</h3>' + heldBars + "</div>" +
+          '<div class="rep-typecol"><h3 class="rep-subhead">Bought vs used in this period</h3>' + moveBars + "</div>" +
+        "</div>";
+    }
+
+    return '<section class="card rep-chart rep-chart--type" aria-labelledby="repTypeTitle">' +
+        '<div class="card__head">' +
+          '<div><h2 class="card__title" id="repTypeTitle">Credits by type</h2>' +
+          '<p class="card__sub">A credit only books its own kind of class</p></div>' +
+          viewToggle("type", "Show credits by type as") +
+        "</div>" +
+        '<div class="card__body">' + body + "</div>" +
+      "</section>";
+  }
+
+  /* ============================================================
+     IN THIS PERIOD — credit movement + activity
      ============================================================ */
   function monthHtml(rep) {
     var m = rep.movement;
+    var act = rep.activity || { classes: 0, booked: 0, present: 0, late: 0, absent: 0, unmarked: 0 };
     var ins = [
       ["Purchased", m.purchased],
       ["Free trial", m.trial],
@@ -328,18 +506,20 @@
     ];
     var inSum = ins.reduce(function (s, x) { return s + x[1]; }, 0);
     var outSum = outs.reduce(function (s, x) { return s + x[1]; }, 0);
-    var net = inSum - outSum;
+    var net = m.net != null ? m.net : inSum - outSum;
     function list(items, sign) {
       return '<dl class="rep-flow__list">' + items.map(function (x) {
         return "<div><dt>" + esc(x[0]) + "</dt>" +
           (x[1] ? "<dd>" + sign + x[1] + "</dd>" : '<dd class="is-zero">0</dd>') + "</div>";
       }).join("") + "</dl>";
     }
-    var range = m.from === m.to ? fmt.date(m.from, "day") : db.formatDate(m.from, "day").replace(/ \w+$/, "") + "–" + fmt.date(m.to, "day");
+    var attendance = [
+      ["Present", act.present], ["Late", act.late], ["Absent", act.absent], ["Not marked", act.unmarked]
+    ];
     return '<section class="card rep-month" aria-labelledby="repMonthTitle">' +
         '<div class="card__head">' +
-          '<div><h2 class="card__title" id="repMonthTitle">This month</h2>' +
-          '<p class="card__sub">' + esc(range) + " · credits in and out</p></div>" +
+          '<div><h2 class="card__title" id="repMonthTitle">In this period</h2>' +
+          '<p class="card__sub">' + esc(rangeLabel(m.from, m.to)) + " · credits in and out</p></div>" +
         "</div>" +
         '<div class="card__body">' +
           '<div class="rep-flow">' +
@@ -350,6 +530,15 @@
             "<div><span>Net change</span><strong>" + esc(fmt.signed(net) || "0") + "</strong>" +
               '<em>' + (net > 0 ? "More credits sold than used" : net < 0 ? "More credits used than sold" : "Balanced") + "</em></div>" +
             "<div><span>Revenue</span><strong>" + esc(fmt.money(m.revenue)) + "</strong><em>PayNow + paid at studio</em></div>" +
+          "</div>" +
+          '<div class="rep-activity">' +
+            '<p class="rep-subhead">Classes in this period</p>' +
+            '<p class="rep-activity__lead"><strong>' + act.classes + "</strong> " +
+              (act.classes === 1 ? "class" : "classes") + " · <strong>" + act.booked + "</strong> " +
+              (act.booked === 1 ? "booking" : "bookings") + "</p>" +
+            '<dl class="rep-activity__list">' + attendance.map(function (x) {
+              return "<div><dt>" + esc(x[0]) + "</dt><dd" + (x[1] ? "" : ' class="is-zero"') + ">" + x[1] + "</dd></div>";
+            }).join("") + "</dl>" +
           "</div>" +
         "</div>" +
       "</section>";
@@ -384,9 +573,18 @@
     return /[",\r\n]/.test(s) || /^\s|\s$/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 
+  // "Junior 8; Elite 4" — every wallet the family holds
+  function walletText(r) {
+    return (r.wallets || []).filter(function (w) { return w.credits; }).map(function (w) {
+      return (w.type.short || w.type.name) + " " + w.credits;
+    }).join("; ");
+  }
+
   function buildCsv(rows) {
-    var head = ["Family", "Children", "Email", "Phone", "Available", "Reserved", "Unutilised",
-      "Est. value (S$)", "Avg price per credit (S$)", "Last class", "Idle days", "Status"];
+    var head = ["Family", "Children", "Email", "Phone", "Available", "By credit type", "Reserved", "Unutilised",
+      "Est. value (S$)", "Avg price per credit (S$)", "Bought in period", "Used in period", "Refunded in period",
+      "Added by staff", "Taken by staff", "Revenue in period (S$)", "Classes attended in period",
+      "Last class", "Idle days", "Status"];
     var lines = [head.map(function (x) { return csvCell(x); }).join(",")];
     rows.forEach(function (r) {
       var f = r.family || {};
@@ -396,10 +594,18 @@
         csvCell(f.email, true),
         csvCell(f.phone, true),
         csvCell(r.available),
+        csvCell(walletText(r), true),
         csvCell(r.reserved),
         csvCell(r.unutilised),
         csvCell(r.estValue.toFixed(2)),
         csvCell(r.unitPrice.toFixed(2)),
+        csvCell(r.bought),
+        csvCell(r.spent),
+        csvCell(r.refunded),
+        csvCell(r.addedByStaff),
+        csvCell(r.takenByStaff),
+        csvCell(Number(r.revenue || 0).toFixed(2)),
+        csvCell(r.attended),
         csvCell(r.lastClass || ""),
         csvCell(r.idleDays),
         csvCell(statuses(r).map(function (x) { return x.label; }).join("; "))
@@ -408,8 +614,8 @@
     return lines.join("\r\n") + "\r\n";
   }
 
-  function exportCsv() {
-    var rep = db.creditReport({ dormantDays: ui.dormant });
+  function exportCsv(rng) {
+    var rep = db.creditReport({ from: rng.from, to: rng.to, dormantDays: ui.dormant });
     var rows = rep.rows.slice().sort(byUnutilised);
     var U = window.URL || window.webkitURL;
     if (typeof window.Blob === "undefined" || !U || typeof U.createObjectURL !== "function") {
@@ -420,7 +626,7 @@
       Admin.toast("warn", "No families to export yet.");
       return;
     }
-    var name = "huacheng-unutilised-credits-" + rep.asOf + ".csv";
+    var name = "huacheng-credits-" + rep.from + "-to-" + rep.to + ".csv";
     // BOM so Excel reads UTF-8 names correctly
     var blob = new window.Blob(["﻿" + buildCsv(rows)], { type: "text/csv;charset=utf-8" });
     var url = U.createObjectURL(blob);
@@ -511,7 +717,7 @@
   /* ============================================================
      VIEW
      ============================================================ */
-  function render(el) {
+  function render(el, params) {
     hideTip();
     tips = {};
     var t = document.getElementById("repTip");
@@ -521,32 +727,68 @@
         h.empty("chart", "Admins only", "Credit reports are available to the studio admin.");
       return;
     }
-    var rep = db.creditReport({ dormantDays: ui.dormant });
+    var rng = range(params || {});
+    var rep = db.creditReport({ from: rng.from, to: rng.to, dormantDays: ui.dormant });
     var intro = !el.querySelector(".rep");
     el.innerHTML = '<div class="rep' + (intro ? " rep--intro" : "") + '">' +
         headHtml(rep) +
+        rangeHtml(rep, rng) +
         kpisHtml(rep) +
         '<div class="rep-grid">' +
           topChartHtml(rep) +
           '<div class="rep-side">' + idleChartHtml(rep) + monthHtml(rep) + "</div>" +
         "</div>" +
+        typeChartHtml(rep) +
         handoffHtml(rep) +
       "</div>";
-    bind(el.querySelector(".rep"));
+    bind(el.querySelector(".rep"), rng);
   }
 
   // Listeners live on the freshly rendered root, so re-renders never stack them.
   // Family links (data-open-family) and Students links (data-go) are handled by the core.
-  function bind(root) {
+  function bind(root, rng) {
     root.querySelector("#repDormant").addEventListener("change", function (e) {
       ui.dormant = parseInt(e.target.value, 10) || 21;
       Admin.refresh();
     });
 
+    // the range lives in the URL, so a refresh (or a shared link) keeps it
+    function setRange(from, to) {
+      hideTip();
+      Admin.setParams({ from: from, to: to });
+    }
+
+    root.addEventListener("change", function (e) {
+      var id = e.target.id;
+      if (id !== "repFrom" && id !== "repTo") return;
+      var today = db.todayISO();
+      var from = root.querySelector("#repFrom").value || rng.from;
+      var to = root.querySelector("#repTo").value || rng.to;
+      if (!ISO.test(from)) from = rng.from;
+      if (!ISO.test(to) || to > today) to = today;
+      if (from > to) { if (id === "repFrom") to = from > today ? today : from; else from = to; }
+      if (from > today) from = today;
+      setRange(from, to);
+    });
+
     root.addEventListener("click", function (e) {
       var t = e.target;
       if (t.closest("[data-open-family], [data-open-student], [data-go]")) { hideTip(); return; }
-      if (t.closest("#repExport")) { exportCsv(); return; }
+      if (t.closest("#repExport")) { exportCsv(rng); return; }
+      var pre = t.closest("[data-rep-range]");
+      if (pre) {
+        var id = pre.getAttribute("data-rep-range");
+        var today2 = db.todayISO();
+        var p = null;
+        PRESETS.forEach(function (x) { if (x.id === id) p = x; });
+        if (p) setRange(p.from(today2), today2);
+        return;
+      }
+      if (t.closest("#repRangeReset")) {
+        var today3 = db.todayISO();
+        setRange(PRESETS[0].from(today3), today3);
+        return;
+      }
       if (t.closest("#repPrint")) { if (typeof window.print === "function") window.print(); return; }
       var v = t.closest("[data-rep-view]");
       if (v) {

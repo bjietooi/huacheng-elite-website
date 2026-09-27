@@ -268,3 +268,8 @@ button.coa-next:hover { background: var(--copper-wash); }
   .coa-busy__item { flex-wrap: wrap; gap: .1rem .6rem; }
   .coa-busy__when { min-width: 0; }
 }
+
+/* private credit type for this coach (see the Packages view) */
+.coa-private { margin-top: .7rem; }
+.coa-private .notice { margin-top: 0; }
+.coa-private .btn { margin-top: .35rem; padding-left: .45rem; }

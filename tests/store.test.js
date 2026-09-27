@@ -143,6 +143,15 @@ ok(made.ok && db.children(made.family.id).length === 1, "admin creates a family 
 eq(db.balance(made.family.id), 0, "no credits until a package is bought");
 ok(db.trialEligible(made.family.id), "new family can still claim the trial");
 
+/* ---------- roster rows carry the class's own wallet ---------- */
+{
+  const past = db.occurrencesForDate(db.addDays(db.todayISO(), -1)).find((o) => o.booked);
+  const row = db.roster(past.key)[0];
+  eq(row.creditType, past.creditType, "roster says which credits the class takes");
+  eq(row.wallet, db.balance(row.family.id, past.creditType), "roster wallet is that type's balance");
+  eq(row.balance, db.balance(row.family.id), "roster balance is still the family total");
+}
+
 /* ---------- persistence ---------- */
 const { HC: H2 } = boot(store);
 eq(H2.db.balance(demo.id, "elite"), db.balance(demo.id, "elite"), "wallets survive a reload");
@@ -151,3 +160,25 @@ eq(H2.db.packages().length, db.packages().length, "packages survive a reload");
 console.log("types:", db.creditTypes().map((t) => t.id + "×" + db.packages({ creditType: t.id }).length).join(" "));
 console.log("demo wallets:", db.balances(demo.id).map((w) => w.type.short + " " + w.credits).join(" · "));
 console.log(checks + " checks passed");
+
+/* ---------- renaming a coach carries their private credits ---------- */
+{
+  const fresh = boot().HC.db;
+  fresh.load();
+  const sophie = fresh.children().find((c) => c.name === "Sophie Lim");
+  const before = fresh.balance(sophie.familyId, "private-coach-b");
+  ok(before > 0, "family holds Private (Coach B) credits");
+  const rowsBefore = fresh.ledger({ creditType: "private-coach-b" }).length;
+  const pkBefore = fresh.packages({ creditType: "private-coach-b" }).length;
+  ok(fresh.updateCoach("coach-b", { name: "Coach Huaiyu" }, { by: "admin" }).ok, "coach renamed");
+  const newId = "private-coach-huaiyu";
+  eq(fresh.creditType(newId).name, "Private (Coach Huaiyu)", "private type renamed with the coach");
+  eq(fresh.creditType("private-coach-b"), null, "old private type is gone");
+  eq(fresh.balance(sophie.familyId, newId), before, "credits followed the rename");
+  eq(fresh.ledger({ creditType: newId }).length, rowsBefore, "history followed the rename");
+  eq(fresh.packages({ creditType: newId }).length, pkBefore, "packages followed the rename");
+  const priv = fresh.occurrencesForRange(fresh.todayISO(), fresh.addDays(fresh.todayISO(), 21))
+    .find((o) => o.programmeId === "private" && o.coach === "Coach Huaiyu");
+  ok(priv && priv.creditType === newId, "private sessions need the renamed credits");
+  console.log(checks + " checks passed (incl. coach rename)");
+}

@@ -1027,8 +1027,22 @@
     return { ok: true, coach: c };
   }
 
-  // Point every stored reference at a coach's new timetable tag.
+  // Point every stored reference at a coach's new timetable tag — including
+  // their private credit type, so credits and packages follow the rename.
   function renameCoachTag(from, to) {
+    var oldType = privateTypeId(from), newType = privateTypeId(to);
+    if (oldType !== newType) {
+      var ct = creditType(oldType);
+      if (ct) {
+        ct.id = newType;
+        ct.coach = to;
+        ct.name = "Private (" + to + ")";
+        ct.short = "Private · " + to;
+      }
+      DB.ledger.forEach(function (l) { if (l.creditType === oldType) l.creditType = newType; });
+      DB.packages.forEach(function (pk) { if (pk.creditType === oldType) pk.creditType = newType; });
+      DB.bookings.forEach(function (b) { if (b.creditType === oldType) b.creditType = newType; });
+    }
     DB.coachAliases[from] = to;
     delete DB.coachAliases[to]; // renaming back must not loop
     Object.keys(DB.templateCoach).forEach(function (tid) {
@@ -1620,10 +1634,18 @@
   function roster(key, opts) {
     opts = opts || {};
     var c = idx();
+    var occ = occurrence(key);
+    var typeId = occ ? occ.creditType : null;
     return bookings({ occKey: key, includeCancelled: !!opts.includeCancelled }).map(function (b) {
       var ch = c.child[b.childId] || { name: "(removed)" };
       var f = c.family[b.familyId] || {};
-      return { booking: b, child: ch, family: f, balance: c.balance[b.familyId] || 0, note: noteForBooking(b.id) };
+      return {
+        booking: b, child: ch, family: f,
+        balance: c.balance[b.familyId] || 0,                                   // every credit the family holds
+        wallet: typeId ? (c.wallet[b.familyId + "|" + typeId] || 0) : 0,       // just this class's credit type
+        creditType: typeId,
+        note: noteForBooking(b.id)
+      };
     }).sort(function (a, b) {
       if (a.booking.status !== b.booking.status) return a.booking.status === "booked" ? -1 : 1;
       return a.child.name.localeCompare(b.child.name);

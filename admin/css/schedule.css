@@ -8,6 +8,8 @@
   --sch-amber:      #b9822b;
   --sch-amber-wash: rgba(185, 130, 43, 0.14);
   --sch-hatch:      repeating-linear-gradient(135deg, rgba(184,69,47,.08) 0 5px, transparent 5px 10px);
+  --sch-private:    #6b5b8a;
+  --sch-private-wash: rgba(107, 91, 138, 0.12);
 }
 
 /* ---------- toolbar ---------- */
@@ -59,6 +61,7 @@
 }
 .sch-legend i.sch-sw--leave::before { background: repeating-linear-gradient(180deg, var(--warn) 0 2px, transparent 2px 4px); }
 .sch-legend i.sch-sw--oneoff { --sw: var(--jade); background: var(--jade-wash); }
+.sch-legend i.sch-sw--private { --sw: var(--sch-private); background: var(--sch-private-wash); }
 .sch-legend i.sch-sw--cover { --sw: var(--slate); }
 .sch-legend i.sch-sw--removed { --sw: transparent; background: transparent; border: 1px dashed var(--line-strong); }
 
@@ -192,6 +195,21 @@ details.sch-key .sch-legend { margin-top: .55rem; }
   --acc: var(--jade);
   background: linear-gradient(140deg, var(--jade-wash), rgba(63,116,101,0) 58%), var(--white);
 }
+/* one-to-one sessions: their own colour, the student instead of a places bar */
+.chip--private { background: var(--sch-private-wash); color: var(--sch-private); }
+.sch-card--private {
+  --acc: var(--sch-private);
+  background: linear-gradient(140deg, var(--sch-private-wash), rgba(107,91,138,0) 58%), var(--white);
+}
+.sch-card__who {
+  display: flex; align-items: center; gap: .35rem; margin-top: .45rem;
+  font-size: .78rem; font-weight: 600; color: var(--ink); line-height: 1.3;
+}
+.sch-card__who .ic { width: 14px; height: 14px; flex: none; color: var(--sch-private); }
+.sch-card__who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-card__who.is-free { font-weight: 500; font-style: italic; color: var(--ink-faint); }
+.sch-card__who.is-free .ic { color: var(--ink-faint); }
+
 .sch-card--blocked, .sch-card--leave {
   --acc: var(--warn);
   background: var(--sch-hatch), #fbf3ef;
@@ -459,6 +477,10 @@ details.sch-key .sch-legend { margin-top: .55rem; }
   font-size: .86rem; font-weight: 600; color: var(--ink);
 }
 .sch-preview .ic { color: var(--copper); }
+
+/* what parents pay with — shown under the programme picker */
+.sch-pay { display: flex; flex-wrap: wrap; align-items: center; gap: .05rem .3rem; }
+.sch-pay:empty { display: none; }
 
 /* ---------- add one-off: one date / several dates (camp) ---------- */
 .sch-form [hidden] { display: none !important; }

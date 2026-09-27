@@ -454,7 +454,7 @@
 
     body.innerHTML = '<div class="coa-dr">' +
         top +
-        section("coaDrProfileH", "Profile", '<div class="card coa-dcard">' + profile + "</div>") +
+        section("coaDrProfileH", "Profile", '<div class="card coa-dcard">' + profile + "</div>" + privateHtml(c)) +
         section("coaDrWeeklyH", "Weekly classes <span class=\"coa-count\">" + plan.now.length + "</span>",
           weeklyHtml(c, plan, active),
           active
@@ -465,6 +465,24 @@
         laterHtml(c, today) +
         section("coaDrLeaveH", "Leave", leaveHtml(c, today)) +
       "</div>";
+  }
+
+  // Every coach gets a "Private (name)" credit type; parents can only buy it
+  // once there's a package for it.
+  function privateHtml(c) {
+    var t = db.creditTypes({ includeInactive: true }).filter(function (x) {
+      return x.kind === "private" && x.coach === c.coach;
+    })[0];
+    if (!t) return "";
+    var live = db.packages({ creditType: t.id });
+    var params = live.length ? { type: t.id } : { type: t.id, add: "1" };
+    return '<div class="coa-private">' + h.notice("info",
+      "<p><strong>" + esc(t.name) + " credits</strong> " + (live.length
+        ? "are on sale — " + esc(Admin.plural(live.length, "package")) + " for 1-to-1 sessions with " + esc(c.name) + "."
+        : "are ready. Add a package so parents can buy 1-to-1 sessions with " + esc(c.name) + ".") + "</p>" +
+      '<p><button type="button" class="btn btn--quiet btn--xs" data-go="packages" data-params="' + attrJson(params) + '" id="coaDrPackages">' +
+        Admin.icon("tag") + (live.length ? "Open Packages" : "Add a package") + Admin.icon("chevron-right", "coa-chev") +
+      "</button></p>") + "</div>";
   }
 
   function weeklyHtml(c, plan, active) {
