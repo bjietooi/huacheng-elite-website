@@ -33,7 +33,7 @@
   var UPCOMING_ON_DASH = 5;
   var LOW_CREDITS = 2;                           // "running low" at or below this
   var MIN_AGE = 4;                               // classes start from age 4 (Wushu Tots)
-  var TIERS = ["junior", "elite", "competitive"];
+  var PILL_WALLETS_MAX = 2;                      // more wallets → a plain "Credits" pill
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
   var App = (HC.app = {});
@@ -168,11 +168,6 @@
     return "";
   }
 
-  function phoneProblem(str) {
-    var digits = String(str || "").replace(/\D/g, "");
-    return digits.length >= 8 ? "" : "Please enter a valid phone number (at least 8 digits).";
-  }
-
   function escRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
   function possessive(name) { return name + "’s"; }
@@ -199,6 +194,30 @@
   // ", shared by Ethan & Chloe" mid-sentence (nothing for one child)
   function sharedByTail(kids) {
     return kids.length > 1 ? ", shared by " + joinNames(kids.map(childFirst)) : "";
+  }
+
+  /* ---------- typed credits ----------
+     A credit belongs to a credit TYPE (Junior / Elite / Competitive /
+     Private with one coach) and only books that type's classes. The family
+     shares one wallet per type. */
+  function wallets() { return db.balances(fid); }
+
+  // "Junior 8 · Elite 2 · Private · Coach A 1"
+  function walletsText(list, sep) {
+    return list.map(function (w) { return w.type.short + " " + w.credits; }).join(sep || " · ");
+  }
+
+  function walletsLabel(list) {
+    return list.length
+      ? list.map(function (w) { return w.type.name + ": " + creditsText(w.credits); }).join(", ")
+      : "no credits yet";
+  }
+
+  function creditChip(typeId, credits) {
+    var t = db.creditType(typeId);
+    var name = t ? t.short || t.name : db.creditTypeShort(typeId);
+    return '<span class="pt-chip pt-chip--credit ' + (t && t.kind === "private" ? "is-private" : "is-" + esc(typeId)) + '">' +
+      esc(name) + (credits == null ? "" : " " + credits) + "</span>";
   }
 
   function tierLabel(tier) {
@@ -328,6 +347,7 @@
   /* ============================================================
      LOGIN PAGE
      ============================================================ */
+  // Accounts are created by the studio — the portal only signs parents in.
   function initLogin() {
     clearLegacy();
     // already signed in? straight to the portal
@@ -335,23 +355,6 @@
       go("portal.html");
       return;
     }
-
-    var tabLogin = byId("tabLogin");
-    var tabSignup = byId("tabSignup");
-    var panelLogin = byId("panelLogin");
-    var panelSignup = byId("panelSignup");
-
-    function selectTab(which, focus) {
-      var loginSel = which === "login";
-      tabLogin.setAttribute("aria-selected", loginSel ? "true" : "false");
-      tabSignup.setAttribute("aria-selected", loginSel ? "false" : "true");
-      panelLogin.classList.toggle("is-active", loginSel);
-      panelSignup.classList.toggle("is-active", !loginSel);
-      var focusEl = focus || (loginSel ? panelLogin : panelSignup).querySelector("input");
-      if (focusEl) { try { focusEl.focus(); } catch (e) {} }
-    }
-    tabLogin.addEventListener("click", function () { selectTab("login"); });
-    tabSignup.addEventListener("click", function () { selectTab("signup"); });
 
     // LOG IN — any password; unknown emails open the demo family
     byId("loginForm").addEventListener("submit", function (e) {
@@ -388,112 +391,19 @@
       byId("forgotHint").classList.add("is-shown");
     });
 
-    // CREATE ACCOUNT
-    var signupForm = byId("signupForm");
-    // [input id, message when empty, its error slot]
-    var REQUIRED = [
-      ["suParent", "Please enter your name.", "suParentError"],
-      ["suEmail", "Please enter your email.", "suEmailError"],
-      ["suPhone", "Please enter a phone number.", "suPhoneError"],
-      ["suChild", "Please enter your child’s name.", "suChildError"],
-      ["suAge", "Please enter your child’s age.", "suAgeError"],
-      ["suPass", "Please create a password.", "suPassError"]
-    ];
-
-    signupForm.addEventListener("submit", function (e) {
-      e.preventDefault();
-      var firstBad = null;
-      function bad(id, errId, msg) {
-        var el = byId(id);
-        el.classList.add("invalid");
-        el.setAttribute("aria-invalid", "true");
-        if (errId) {
-          var err = byId(errId);
-          if (err && !err.textContent) err.textContent = msg;
-        }
-        if (!firstBad) firstBad = el;
-      }
-
-      byId("signupError").textContent = "";
-      REQUIRED.forEach(function (r) {
-        var el = byId(r[0]);
-        var err = byId(r[2]);
-        if (err) err.textContent = "";
-        el.classList.remove("invalid");
-        el.removeAttribute("aria-invalid");
-        if (!val(r[0])) bad(r[0], r[2], r[1]);
-      });
-
-      var email = val("suEmail");
-      var emailTaken = false;
-      if (email && !EMAIL_RE.test(email)) {
-        bad("suEmail", "suEmailError", "Please enter a valid email address.");
-      } else if (email && db.familyByEmail(email)) {
-        emailTaken = true;
-        bad("suEmail", null);
-      }
-      var phone = val("suPhone");
-      if (phone && phoneProblem(phone)) bad("suPhone", "suPhoneError", phoneProblem(phone));
-      var ageRaw = val("suAge");
-      var age = parseAge(ageRaw);
-      if (ageProblem(ageRaw)) bad("suAge", "suAgeError", ageProblem(ageRaw));
-
-      var agreeErr = byId("agreeError");
-      if (!byId("suAgree").checked) {
-        agreeErr.textContent = "Please agree to the Terms & Conditions to continue.";
-        if (!firstBad) firstBad = byId("suAgree");
-      } else {
-        agreeErr.textContent = "";
-      }
-
-      if (emailTaken) showEmailTaken(email);
-      if (firstBad) {
-        try { firstBad.focus(); } catch (err) {}
-        return;
-      }
-
-      var res = db.createFamily({
-        parentName: val("suParent"),
-        email: email,
-        phone: val("suPhone"),
-        children: [{ name: val("suChild"), age: age }]
-      }, { trialCredit: true });
-
-      if (!res.ok) {
-        if (/email/i.test(res.error)) showEmailTaken(email);
-        else byId("signupError").textContent = res.error;
-        return;
-      }
-      App.login(res.family.id, "Welcome to Huacheng Elite! Your free trial credit is ready — pick a class to get started.");
-    });
-
-    function showEmailTaken(email) {
-      var input = byId("suEmail");
-      input.classList.add("invalid");
-      input.setAttribute("aria-invalid", "true");
-      byId("suEmailError").innerHTML = "An account with this email already exists. " +
-        '<button type="button" class="auth__link pt-inline-link" id="suToLogin">Log in instead</button>';
-      byId("suToLogin").addEventListener("click", function () {
-        byId("loginEmail").value = email;
-        selectTab("login", byId("loginPass"));
-      });
-    }
-
-    // clear invalid state (and the field's own message) as the parent types
-    signupForm.querySelectorAll("input").forEach(function (el) {
-      el.addEventListener("input", function () {
-        el.classList.remove("invalid");
-        el.removeAttribute("aria-invalid");
-        String(el.getAttribute("aria-describedby") || "").split(/\s+/).forEach(function (id) {
-          var err = id && byId(id);
-          if (err && err.classList.contains("field-error")) err.textContent = "";
-        });
-      });
-    });
     byId("loginEmail").addEventListener("input", function () { setFieldError("loginEmail", "loginError", ""); });
-    byId("suAgree").addEventListener("change", function () {
-      if (this.checked) byId("agreeError").textContent = "";
-    });
+
+    // "New here?" — the studio sets accounts up, so point at WhatsApp / the phone
+    var wa = byId("loginWhatsApp");
+    if (wa) {
+      wa.setAttribute("href", "https://wa.me/" + HC.brand.whatsapp + "?text=" +
+        encodeURIComponent("Hi Huacheng Elite, I’d like to set up a booking account for my child."));
+    }
+    var tel = byId("loginPhone");
+    if (tel) {
+      tel.setAttribute("href", "tel:" + HC.brand.phoneDisplay.replace(/[^\d+]/g, ""));
+      tel.textContent = HC.brand.phoneDisplay;
+    }
 
     // DEMO ACCOUNT
     byId("demoBtn").addEventListener("click", function () {
@@ -516,14 +426,16 @@
     kid: "all",          // bookings child filter
     pastLimit: PAST_PAGE,
     ledgerKid: "all",    // credits: history for every child, or one child's classes
-    otherLevels: false,  // credits: show package levels none of the children train at
+    ledgerType: "all",   // credits: history for one credit type
+    creditType: null,    // credits: a credit type to scroll to / highlight
+    otherRates: false,   // credits: show the credit types the children don't train at
     ledgerLimit: LEDGER_PAGE,
     noticesAll: false
   };
   var batching = 0, batchDirty = false;
   var pendingRender = false;   // a change arrived while a modal was open
   var resetFormId = null;      // form whose typed values should NOT survive the next render
-  var lastBalance = null;      // bumps the pill when the family balance changes
+  var lastBalance = null;      // "junior:8|elite:2" — bumps the pill when a wallet changes
   var scrollToHistory = false; // credits: jump to the history after the next render
 
   var RENDER = {
@@ -690,12 +602,19 @@
     book: function (key) { openBookModal(key); },
     buy: function (id) { purchase(id); },
     "credit-history": function () { openCredits(true); },
+    // Credits view with one credit type in view (dashboard, schedule, booking dialog)
+    "credits-type": function (typeId) { openCredits(false, typeId); },
     "ledger-kid": function (arg) {
       ui.ledgerKid = arg || "all";
       ui.ledgerLimit = LEDGER_PAGE;
       renderView(true);
     },
-    "other-levels": function () { ui.otherLevels = !ui.otherLevels; renderView(true); },
+    "other-rates": function () { ui.otherRates = !ui.otherRates; renderView(true); },
+    "ledger-type": function (arg) {
+      ui.ledgerType = arg || "all";
+      ui.ledgerLimit = LEDGER_PAGE;
+      renderView(true);
+    },
     "all-feedback": function () {
       ui.tab = "past";
       ui.kid = "all";
@@ -779,9 +698,11 @@
   /* ============================================================
      APP BAR
      ============================================================ */
-  function openCredits(toHistory) {
+  function openCredits(toHistory, typeId) {
     if (modal.open) closeModal();
     scrollToHistory = !!toHistory;
+    ui.creditType = typeId && db.creditType(typeId) ? typeId : null;
+    if (ui.creditType) ui.otherRates = true;   // make sure its group is on screen
     showView("credits");
   }
 
@@ -789,22 +710,34 @@
     var fam = db.family(fid);
     if (!fam) return;
     var kids = db.children(fid);
-    var bal = db.balance(fid);
+    var list = wallets();
+    var sig = list.map(function (w) { return w.type.id + ":" + w.credits; }).join("|");
 
     var pill = byId("creditsPill");
     if (pill) {
-      pill.innerHTML = '<span class="dia" aria-hidden="true">◆</span> ' + creditsText(bal);
-      pill.classList.toggle("is-neg", bal < 0);
-      var label = "Family credits: " + creditsText(bal) + sharedByTail(kids) + ". Open credits";
+      var named = list.length > 0 && list.length <= PILL_WALLETS_MAX;
+      var chars = list.reduce(function (n, w) { return n + w.type.short.length; }, 0);
+      pill.innerHTML = '<span class="dia" aria-hidden="true">◆</span>' +
+        (named
+          ? '<span class="pt-pill__wallets">' + list.map(function (w) {
+              return '<span class="pt-pill__w">' + esc(w.type.short) +
+                ' <b class="pt-pill__n is-' + creditState(w.credits) + '">' + w.credits + "</b></span>";
+            }).join('<span class="pt-pill__sep"> · </span>') + "</span>"
+          : "") +
+        '<span class="pt-pill__short">Credits</span>' +
+        (list.some(function (w) { return w.credits <= 0; }) ? '<i class="pt-pill__alert" aria-hidden="true"></i>' : "");
+      pill.className = "credits-pill " + (named ? "pt-pill--named" : "pt-pill--short") +
+        (named && chars > 12 ? " pt-pill--long" : "") + (pill.classList.contains("bump") ? " bump" : "");
+      var label = "Family credits — " + walletsLabel(list) + sharedByTail(kids) + ". Open credits";
       pill.setAttribute("aria-label", label);
       pill.setAttribute("title", label);
-      if (lastBalance !== null && bal !== lastBalance) {
+      if (lastBalance !== null && sig !== lastBalance) {
         pill.classList.remove("bump");
         void pill.offsetWidth; // restart the animation
         pill.classList.add("bump");
       }
     }
-    lastBalance = bal;
+    lastBalance = sig;
 
     var name = byId("whoName");
     var sub = byId("whoSub");
@@ -862,13 +795,24 @@
 
   // The family's one shared credit balance.
   function balanceCardHTML(kids) {
-    var bal = db.balance(fid);
-    return '<section class="balance-card pt-balance is-' + creditState(bal) + '" aria-labelledby="ptBalanceTitle">' +
+    var list = wallets();
+    var total = db.balance(fid);
+    var rows = list.length
+      ? '<ul class="pt-wallets">' + list.map(function (w) {
+          return '<li class="pt-wallet is-' + creditState(w.credits) + '">' +
+              '<span class="pt-wallet__n">' + w.credits + "</span>" +
+              '<span class="pt-wallet__t">' + esc(w.type.name) + "</span>" +
+              '<button class="pt-linkbtn pt-wallet__buy" type="button" data-action="credits-type" data-arg="' + esc(w.type.id) + '"' +
+                ' aria-label="Buy ' + esc(w.type.name) + ' credits">Top up</button>' +
+            "</li>";
+        }).join("") + "</ul>"
+      : '<p class="pt-balance-status">No credits yet — buy a package to start booking.</p>';
+    return '<section class="balance-card pt-balance is-' + creditState(total) + '" aria-labelledby="ptBalanceTitle">' +
         '<div class="balance-card__info">' +
           '<h2 class="balance-card__k" id="ptBalanceTitle">Family credits</h2>' +
-          '<p class="balance-card__n">' + bal + '<span class="unit">credit' + (bal === 1 ? "" : "s") + "</span></p>" +
-          (kids.length ? '<p class="pt-balance-note">' + esc(sharedByText(kids)) + "</p>" : "") +
-          '<p class="pt-balance-status"><i class="pt-balance-status__dot" aria-hidden="true"></i>' + esc(creditStatusText(bal)) + "</p>" +
+          rows +
+          (kids.length ? '<p class="pt-balance-note">' + esc(sharedByText(kids)) +
+            " — each class uses credits of its own type.</p>" : "") +
         "</div>" +
         '<div class="balance-card__actions">' +
           '<button class="btn btn--primary" type="button" id="ptBuyFromCard" data-view="credits">Buy credits</button>' +
@@ -1038,6 +982,7 @@
     var ws = db.addDays(db.weekStart(db.todayISO()), ui.week * 7);
     var days = db.weekDates(ws);
     var kids = db.children(fid);
+    var list = wallets();
     var bal = db.balance(fid);
 
     var cols = days.map(function (d) {
@@ -1058,12 +1003,14 @@
     el.innerHTML =
       '<div class="view__head">' +
         '<h1 class="view__title">Class schedule</h1>' +
-        '<p class="view__sub">Book up to four weeks ahead — each child uses ' + dia(1) + " credit per class from your family balance. " +
-          "Your family has <strong>" + esc(creditsText(bal)) + "</strong>" + esc(sharedByTail(kids)) + ".</p>" +
+        '<p class="view__sub">Book up to four weeks ahead — every class uses ' + dia(1) + " credit of its own type. " +
+          (list.length
+            ? 'Your family has <strong class="pt-nowrap">' + esc(walletsText(list)) + "</strong>" + esc(sharedByTail(kids)) + "."
+            : "Your family has no credits yet.") + "</p>" +
       "</div>" +
       '<div class="pt-schedbar">' + weekNavHTML(ws) + legendHTML() + "</div>" +
       (bal <= 0
-        ? alertHTML("warn", '<span class="pt-alert__text">You’re out of family credits — top up to book the next class.</span>' +
+        ? alertHTML("warn", '<span class="pt-alert__text">You’re out of credits — top up to book the next class.</span>' +
             '<button class="btn btn--primary btn--sm pt-alert__cta" type="button" data-view="credits">Buy credits</button>')
         : "") +
       '<div class="cal cal--portal" aria-label="Classes for the week of ' + esc(db.formatDate(ws, "long")) + '">' + cols + "</div>";
@@ -1135,14 +1082,21 @@
       cls = " is-full";
       spots = "Full";
       action = '<button class="cal__book" type="button" disabled>Full</button>';
+    } else if (db.balance(fid, o.creditType) < o.cost) {
+      // the family holds no credits of this class's type
+      cls = o.spotsLeft <= 2 ? " is-low" : "";
+      spots = o.spotsLeft + " left";
+      action = '<button class="cal__book cal__book--buy" type="button" data-action="credits-type" data-arg="' + esc(o.creditType) +
+        '" aria-label="Buy ' + esc(o.creditTypeName) + ' credits to book ' + esc(label) + '">Buy ' + esc(o.creditTypeName) + " credits</button>";
     } else {
       cls = o.spotsLeft <= 2 ? " is-low" : "";
       spots = o.spotsLeft + " left";
       action = '<button class="cal__book" type="button" data-action="book" data-arg="' + esc(o.key) +
-        '" aria-label="Book ' + esc(label) + '">Book ' + dia(o.cost) + "</button>";
+        '" aria-label="Book ' + esc(label) + ' with ' + esc(o.creditTypeName) + ' credits">Book ' + dia(o.cost) + "</button>";
     }
 
-    var title = o.name + (o.level ? " · " + o.level : "") + " · " + o.coach + " · " + timeRange(o);
+    var title = o.name + (o.level ? " · " + o.level : "") + " · " + o.coach + " · " + timeRange(o) +
+      " · uses " + o.creditTypeName + " credits";
     return '<div class="cal__event cal__event--p' + cls + (o.oneOff ? " is-special" : "") + '" title="' + esc(title) + '">' +
         (o.oneOff ? '<span class="pt-special">' + icon("spark") + "Special class</span>" : "") +
         '<span class="cal__time">' + esc(HC.formatTime(o.time)) + "</span>" +
@@ -1152,6 +1106,8 @@
           '<span class="cal__coach">' + esc(o.coach) + "</span>" +
           (spots ? '<span class="cal__spots">' + spots + "</span>" : "") +
         "</span>" +
+        '<span class="pt-cal-credit" title="' + esc("Uses " + o.creditTypeName + " credits") + '">' +
+          '<span class="dia" aria-hidden="true">◆</span>' + esc(o.creditTypeName) + "</span>" +
         action +
       "</div>";
   }
@@ -1160,7 +1116,7 @@
      Who's coming is a dropdown: a select-style button opens a panel with a
      checkbox per child (several children can be booked at once — e.g. three
      siblings into one Competitive Private Group session). Every place is paid
-     from the FAMILY balance. */
+     from the family's wallet for THIS class's credit type. */
   function openBookModal(key) {
     if (!db.occurrence(key)) {
       toast("warn", "That class is no longer on the schedule.");
@@ -1169,6 +1125,7 @@
     var sel = {};          // childId → true
     var err = "";
     var errCredits = false;
+    var errType = null;
     var pickerOpen = false;
 
     // default: the first child who isn't already booked into this class
@@ -1199,9 +1156,11 @@
         : o.started ? "This class has already started, so booking is closed."
         // [PORT-8] full while someone is still to book → say so straight away
         : o.spotsLeft <= 0 && waiting.length ? "Sorry, this class is now full." : "";
+      var type = o ? o.creditType : null;
       return {
         o: o, kids: kids, booked: booked, chosen: chosen, waiting: waiting, closed: closed,
-        bal: db.balance(fid), cost: o ? chosen.length * o.cost : 0
+        type: type, typeName: o ? o.creditTypeName : "",
+        bal: type ? db.balance(fid, type) : 0, cost: o ? chosen.length * o.cost : 0
       };
     }
 
@@ -1293,22 +1252,26 @@
       }
       if (short || (err && errCredits)) {
         html += alertHTML("warn", '<span class="pt-alert__text">' + (n
-            ? "Not enough credits — this needs " + creditsText(s.cost) + " and your family has " + s.bal + "."
-            : "Your family has " + creditsText(s.bal) + " — top up to book this class.") + "</span>" +
-          '<button class="btn btn--primary btn--sm pt-alert__cta" type="button" id="ptBuyCredits" data-view="credits">Buy credits</button>', true);
+            ? "Not enough " + esc(s.typeName) + " credits — this class needs " + s.cost + " and your family has " + s.bal + "."
+            : "Your family has " + s.bal + " " + esc(s.typeName) + " credits — top up to book this class.") + "</span>" +
+          '<button class="btn btn--primary btn--sm pt-alert__cta" type="button" id="ptBuyCredits" data-action="credits-type"' +
+          ' data-arg="' + esc(s.type || "") + '">Buy ' + esc(s.typeName) + " credits</button>", true);
       }
       if (err && !errCredits) html += alertHTML("warn", esc(err), true);
 
       // summary: who, what it uses, and the family balance before → after
       if (o && !s.closed && s.kids.length && !everyone) {
         html += '<p class="pt-summary' + (short ? " is-short" : "") + '" aria-live="polite">' + (n
-          ? esc(joinNames(s.chosen.map(childFirst))) + " · uses <strong>" + creditsText(s.cost) + "</strong>" +
-            ' · <span class="pt-nowrap">family balance ' + s.bal + " → <strong>" + (s.bal - s.cost) + "</strong></span>"
-          : "Choose who’s coming — credits come from your family balance.") + "</p>";
+          ? esc(joinNames(s.chosen.map(childFirst))) + " · uses <strong>" + s.cost + " " + esc(s.typeName) +
+            " credit" + (s.cost === 1 ? "" : "s") + "</strong>" +
+            ' · <span class="pt-nowrap">' + esc(s.typeName) + " " + s.bal + " → <strong>" + (s.bal - s.cost) + "</strong></span>"
+          : "Choose who’s coming — this class uses " + esc(s.typeName) + " credits.") + "</p>";
       }
 
       var disabled = !o || !!s.closed || !n || tooMany || short;
-      var label = n ? "Book " + joinNames(s.chosen.map(childFirst)) + " · " + creditsText(s.cost) : "Confirm booking";
+      var label = n
+        ? "Book " + joinNames(s.chosen.map(childFirst)) + " · " + s.cost + " " + s.typeName + " credit" + (s.cost === 1 ? "" : "s")
+        : "Confirm booking";
       html += '<div class="modal__actions">' +
           (s.kids.length && !everyone
             ? '<button class="btn btn--primary btn--block" type="button" id="ptBookConfirm"' + (disabled ? " disabled" : "") + ">" + esc(label) + "</button>"
@@ -1350,6 +1313,7 @@
         cb.addEventListener("change", function () {
           if (cb.checked) sel[cb.value] = true; else delete sel[cb.value];
           err = "";
+          errCredits = false;
           paint();
         });
       });
@@ -1392,7 +1356,7 @@
       if (f && !f.disabled && !f.closest("[hidden]")) { try { f.focus(); } catch (e) {} }
     }
 
-    // HC.db.book re-checks everything (status, spots, family credits, duplicates) per child.
+    // HC.db.book re-checks everything (status, spots, the right credits, duplicates) per child.
     function confirmBooking() {
       var s = state();
       if (!s.o || s.closed || !s.chosen.length) { paint(); return; }
@@ -1402,7 +1366,7 @@
         s.chosen.forEach(function (k) {
           var res = db.book(key, k.id, { familyId: fid, by: "parent:" + fid, source: "parent" });
           if (res.ok) { ok.push(childFirst(k)); delete sel[k.id]; }
-          else failed.push({ name: childFirst(k), error: res.error, code: res.code });
+          else failed.push({ name: childFirst(k), error: res.error, code: res.code, creditType: res.creditType });
         });
       });
       var when = s.o.name + ", " + whenText(s.o);
@@ -1416,6 +1380,7 @@
       } else {
         err = failed[0].error;
         errCredits = failed[0].code === "credits";
+        if (errCredits && failed[0].creditType) errType = failed[0].creditType;
         paint();
         toast("warn", "Couldn’t book: " + failed[0].error);
       }
@@ -1442,7 +1407,7 @@
     var meta = [o.coach, o.level ? o.level + " level" : "", o.status === "open" && !o.started ? plural(o.spotsLeft, "spot") + " left" : ""]
       .filter(Boolean).join(" · ");
     return '<div class="pt-classinfo">' +
-        (o.oneOff ? specialChip() : "") +
+        (o.oneOff ? specialChip() : "") + creditChip(o.creditType) +
         '<p class="pt-classinfo__name">' + esc(o.name) + "</p>" +
         '<p class="pt-classinfo__when">' + esc(db.formatDate(o.date, "full") + " · " + timeRange(o)) + "</p>" +
         '<p class="pt-classinfo__meta">' + esc(meta) + "</p>" +

@@ -51,7 +51,8 @@
   var BLOCK_REASONS = ["Coach unavailable", "Coach unwell", "Competition / event duty", "Studio maintenance", "Other"];
   var LEGEND = [
     ["open", "Open"], ["nearly", "Nearly full"], ["full", "Full"], ["blocked", "Blocked"],
-    ["leave", "Coach on leave"], ["oneoff", "One-off"], ["cover", "Cover"], ["removed", "Deleted"]
+    ["leave", "Coach on leave"], ["oneoff", "One-off"], ["private", "Private 1-to-1"],
+    ["cover", "Cover"], ["removed", "Deleted"]
   ];
 
   // UI state that must survive re-renders
@@ -130,10 +131,16 @@
     return "open";
   }
 
-  // one colour per card: status beats one-off beats cover beats how full it is
+  function isPrivate(occ) { return occ.tier === "private"; }
+
+  // the one-to-one sessions' default note repeats the chip
+  function autoPrivateNote(occ) { return isPrivate(occ) && /^Private 1-to-1/.test(occ.note || ""); }
+
+  // one colour per card: status beats private / one-off beats cover beats how full it is
   function cardState(occ) {
     if (occ.status === "removed") return "removed";
     if (occ.status === "blocked") return occ.blockKind === "leave" ? "leave" : "blocked";
+    if (isPrivate(occ)) return "private";
     if (occ.oneOff) return "oneoff";
     if (occ.substituted) return "cover";
     return fillState(occ);
@@ -150,12 +157,15 @@
   // the chips that add to the status: one-off, cover, full
   function extraChips(occ) {
     var out = [];
+    if (isPrivate(occ)) {
+      out.push(h.chip("Private", "private", "Private 1-to-1 with " + occ.coach + " · " + occ.creditTypeName + " credits"));
+    }
     if (occ.groupId) {
       var g = groupOf(occ.groupId);
       var n = sessionNumber(g, occ.key);
       out.push(h.chip(groupLabel(occ), "oneoff chip--group",
         g && n ? "Session " + n + " of " + g.total + " · " + occ.groupName : occ.groupName));
-    } else if (occ.oneOff) out.push(h.chip("One-off", "oneoff", occ.note));
+    } else if (occ.oneOff && !isPrivate(occ)) out.push(h.chip("One-off", "oneoff", occ.note));
     if (occ.substituted) {
       out.push(h.chip("Cover for " + occ.originalCoach, "sub",
         who(occ.coach) === "You" ? "You're covering this date" : occ.coach + " is covering this date"));
@@ -555,7 +565,10 @@
     if (!x.leaves.length) return "";
     return '<div class="sch-day__leave">' + x.leaves.map(function (l) {
       var you = who(l.coach) === "You";
-      return h.chip(you ? "You're on leave" : l.coach + " on leave", "leave", l.reason || "On leave");
+      var when = db.leaveLabel(l);
+      var part = l.allDay === false || (l.from && l.to);
+      return h.chip((you ? "You're on leave" : l.coach + " on leave") + (part ? " · " + when : ""), "leave",
+        (l.reason ? l.reason + " · " : "") + when);
     }).join("") + "</div>";
   }
 
@@ -635,9 +648,16 @@
       "</button>";
     if (!coachMode() || occ.coach !== myCoach()) body += '<p class="sch-card__coach">' + esc(occ.coach) + "</p>";
 
-    if (occ.status === "open") {
+    if (occ.status === "open" && isPrivate(occ)) {
+      // one seat only: the student's name says more than a 0/1 bar
+      var student = privateStudent(occ);
+      body += '<p class="sch-card__who' + (student ? "" : " is-free") + '" title="' +
+        esc(occ.creditTypeName + " credits") + '">' + icon("user") +
+        "<span>" + esc(student ? student : "No student booked yet") + "</span></p>";
+    } else if (occ.status === "open") {
       var pct = occ.capacity ? Math.min(100, Math.round((occ.booked / occ.capacity) * 100)) : 0;
-      body += '<div class="sch-cap" title="' + esc(occ.booked + " of " + occ.capacity + " places booked") + '">' +
+      body += '<div class="sch-cap" title="' + esc(occ.booked + " of " + occ.capacity + " places booked · " +
+          occ.creditTypeName + " credits") + '">' +
           '<span class="sch-cap__bar"><i style="width:' + pct + '%"></i></span>' +
           '<span class="sch-cap__n"><b>' + occ.booked + "</b>/" + occ.capacity + "</span>" +
         "</div>";
@@ -645,7 +665,9 @@
       var why = occ.reason || (occ.blockKind === "leave" ? "Coach on leave" : "");
       if (why) body += '<p class="sch-card__reason">' + esc(why) + "</p>";
     }
-    if (occ.oneOff && occ.note && occ.note !== occ.groupName) body += '<p class="sch-card__note">' + esc(occ.note) + "</p>";
+    if (occ.oneOff && occ.note && occ.note !== occ.groupName && !autoPrivateNote(occ)) {
+      body += '<p class="sch-card__note">' + esc(occ.note) + "</p>";
+    }
 
     body += '<div class="sch-card__foot">' +
         '<span class="chips sch-card__chips">' + statusChip(occ) + extraChips(occ) + "</span>" +
@@ -657,6 +679,13 @@
         '<div class="sch-card__body">' + body + "</div>" +
         (menu ? moreButton(occ) : "") +
       "</article>";
+  }
+
+  // the child booked into a one-to-one session, if any
+  function privateStudent(occ) {
+    if (!occ.booked) return "";
+    var row = db.roster(occ.key).filter(function (r) { return r.booking.status === "booked"; })[0];
+    return row ? row.child.name : "";
   }
 
   function timeHtml(occ, layout) {
@@ -675,13 +704,20 @@
     else if (occ.status === "blocked") parts.push(occ.blockKind === "leave" ? "closed, coach on leave" : "blocked");
     else {
       parts.push(cs.key === "now" ? "happening now" : cs.label.toLowerCase());
-      parts.push(occ.booked + " of " + occ.capacity + " booked" + (occ.spotsLeft === 0 ? ", full" : ""));
+      if (!isPrivate(occ)) parts.push(occ.booked + " of " + occ.capacity + " booked" + (occ.spotsLeft === 0 ? ", full" : ""));
+    }
+    if (isPrivate(occ)) {
+      parts.push("private one-to-one");
+      var who1 = occ.status === "open" ? privateStudent(occ) : "";
+      if (who1) parts.push("with " + who1);
+      else if (occ.status === "open") parts.push("no student booked yet");
     }
     if (occ.groupId) {
       var g = groupOf(occ.groupId);
       var n = sessionNumber(g, occ.key);
       parts.push((g && n ? "session " + n + " of " + g.total + ", " : "") + occ.groupName);
-    } else if (occ.oneOff) parts.push("one-off class");
+    } else if (occ.oneOff && !isPrivate(occ)) parts.push("one-off class");
+    if (occ.status !== "removed") parts.push("pays with " + occ.creditTypeName + " credits");
     if (occ.substituted) parts.push((who(occ.coach) === "You" ? "you're covering for " : "covering for ") + occ.originalCoach);
     var att = h.attendance(occ);
     if (att.key === "done" || att.key === "todo") parts.push(att.label);
@@ -1247,15 +1283,18 @@
 
     if (occ.blockKind === "leave") {
       var canSwap = Admin.can("substitute") && !occ.started;
-      var lv = db.leaveFor(occ.coach, occ.date);
+      var lv = db.leaveFor(occ.coach, occ.date, occ.time, occ.duration);
       var you = who(occ.coach) === "You";
+      var window = occ.leaveWindow;
       Admin.openModal({
         title: "Closed for leave",
         sub: occSub(occ),
         size: "sm",
         body: h.notice("info",
-          "<p><strong>" + (you ? "You're" : esc(occ.coach) + " is") + " on leave on " + esc(fmt.date(occ.date, "long")) + "</strong>" +
-            (lv && lv.reason ? " (" + esc(lv.reason) + ")" : "") + ", so every class " + (you ? "you teach" : "they teach") + " that day is closed.</p>" +
+          "<p><strong>" + (you ? "You're" : esc(occ.coach) + " is") + " on leave on " + esc(fmt.date(occ.date, "long")) +
+            (window ? ", " + esc(db.leaveLabel(lv)) : "") + "</strong>" +
+            (lv && lv.reason ? " (" + esc(lv.reason) + ")" : "") + ", so " +
+            (window ? "classes in that window are" : "every class " + (you ? "you teach" : "they teach") + " that day is") + " closed.</p>" +
           "<p>To reopen this class, cancel the leave on the Leave page" +
             (canSwap ? " — or hand the class to another coach." : ".") + "</p>"),
         actions:
@@ -1476,7 +1515,7 @@
     if (occ.ended) { Admin.toast("info", "This class has already ended — there's nothing to restore."); return; }
 
     var focusBack = rememberFocus();
-    var lv = db.leaveFor(occ.coach, occ.date);
+    var lv = db.leaveFor(occ.coach, occ.date, occ.time, occ.duration);
     var body = series
       ? "<p><strong>" + esc(occ.name) + "</strong> will run every " + esc(HC.dayNames[occ.day]) + " at " + esc(fmt.time(occ.time)) +
         " again — every week from " + esc(fmt.date(seriesStart(occ), "full")) + " onwards comes back.</p>"
@@ -1485,6 +1524,7 @@
     body += "<p>Bookings refunded when it was deleted aren't brought back — parents will need to book again.</p>";
     if (lv) {
       body += h.notice("warn", "<p>" + esc(occ.coach) + " is on leave on " + esc(fmt.date(occ.date)) +
+        (lv.allDay === false ? " (" + esc(db.leaveLabel(lv)) + ")" : "") +
         ", so this date stays closed until the leave is cancelled.</p>");
     }
 
@@ -1593,10 +1633,10 @@
         }
 
         function paintOne(c, out) {
-          var lv = db.leaveFor(c, occ.date);
+          var lv = db.leaveFor(c, occ.date, occ.time, occ.duration);
           var cl = openClashes(occ.date, occ.time, occ.duration, c, key);
           if (lv) {
-            out.push(h.notice("warn", "<p><strong>" + esc(c) + " is on leave that day</strong>" +
+            out.push(h.notice("warn", "<p><strong>" + esc(c) + " is on leave then</strong> (" + esc(db.leaveLabel(lv)) + ")" +
               (lv.reason ? " (" + esc(lv.reason) + ")" : "") + ". The class will stay closed" +
               (occ.booked ? " and " + refundText(occ.booked, occ.cost).replace(" will be removed,", " will be") : ".") + "</p>"));
           }
@@ -1612,7 +1652,9 @@
         }
 
         function paintWeekly(c, out) {
-          var leaves = db.leaves({ coach: c, from: occ.date }).filter(function (l) { return db.dayIndex(l.date) === occ.day; });
+          var leaves = db.leaves({ coach: c, from: occ.date }).filter(function (l) {
+            return db.dayIndex(l.date) === occ.day && !!db.leaveFor(c, l.date, occ.time, occ.duration);
+          });
           if (leaves.length) {
             var hit = 0;
             leaves.forEach(function (l) {
@@ -1735,10 +1777,26 @@
       counts[w.programmeId] = (counts[w.programmeId] || 0) + 1;
     });
     var best = null;
-    HC.programmes.forEach(function (p) {
+    db.programmes().forEach(function (p) {
       if (counts[p.id] && (!best || counts[p.id] > counts[best.id])) best = p;
     });
-    return best || HC.programmes[0];
+    return best || db.programmes()[0];
+  }
+
+  // every programme the console can schedule — the class list plus Private 1-to-1
+  function programmeOptions(selected) {
+    return h.options(db.programmes().map(function (p) {
+      return { value: p.id, label: p.name };
+    }), selected);
+  }
+
+  function isPrivateProgramme(p) { return !!p && p.tier === "private"; }
+
+  // "Parents pay with [Junior] credits."
+  function payLine(programmeId, coach) {
+    var type = db.creditTypeFor({ programmeId: programmeId, coach: coach });
+    if (!type) return "";
+    return "<span>Parents pay with </span>" + h.creditChip(type) + "<span> credits.</span>";
   }
 
   function suggestTime(date) {
@@ -1804,7 +1862,7 @@
     var date = isIso(prefill.date) && prefill.date >= t ? prefill.date : t;
     if (date === t && !canAdd(t)) date = db.addDays(t, 1);
     var coach = isActiveCoach(prefill.coach) ? prefill.coach : firstActiveCoach();
-    var prog = HC.getProgramme(prefill.programmeId) || usualProgramme(coach);
+    var prog = db.programme(prefill.programmeId) || usualProgramme(coach);
     var dur = DURATIONS.indexOf(+prefill.duration) >= 0 ? +prefill.duration : (prog.duration || 60);
     var cap = +prefill.capacity >= 1 ? Math.min(Math.floor(+prefill.capacity), prog.maxSize) : prog.maxSize;
     var time = /^\d{2}:\d{2}$/.test(prefill.time || "") ? prefill.time : suggestTime(date);
@@ -1862,7 +1920,8 @@
           "</div>" +
           '<div class="field">' +
             '<label for="schOoProg">Programme</label>' +
-            '<select id="schOoProg" aria-describedby="schOoProgErr">' + h.programmeOptions(prog.id) + "</select>" +
+            '<select id="schOoProg" aria-describedby="schOoPay schOoProgErr">' + programmeOptions(prog.id) + "</select>" +
+            '<p class="field__hint sch-pay" id="schOoPay"></p>' +
             errSlot("schOoProg") +
           "</div>" +
           '<div class="field-row">' +
@@ -2221,7 +2280,7 @@
         capEl.addEventListener("input", function () { clear("schOoCap"); });
         coachEl.addEventListener("change", function () { clear("schOoCoach"); paint(); });
         progEl.addEventListener("change", function () {
-          var p = HC.getProgramme(progEl.value);
+          var p = db.programme(progEl.value);
           clear("schOoProg");
           if (!p) return;
           // a new programme brings its own length and class-size limit
@@ -2271,7 +2330,7 @@
 
         function submitMany() {
           var d = read();
-          var p = HC.getProgramme(d.programmeId);
+          var p = db.programme(d.programmeId);
           var errs = {};
           var badRange = null;
           if (!d.name) errs.schOoName = "Give the sessions a name, e.g. June Boot Camp.";
@@ -2334,7 +2393,7 @@
 
         function submitOne() {
           var d = read();
-          var p = HC.getProgramme(d.programmeId);
+          var p = db.programme(d.programmeId);
           var tNow = today();
           var errs = {};
           if (!isIso(d.date)) errs.schOoDate = "Choose a date.";

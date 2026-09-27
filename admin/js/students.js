@@ -4,8 +4,10 @@
    THE list of every student with their family's credits and
    status (it replaces the old "All families" table on Reports),
    the student profile drawer and the staff "book a child" modal.
-   Credits are ONE shared pool per family: siblings book from the
-   same balance, so every credit figure here is the family's.
+   Credits are shared by the family and belong to a credit TYPE
+   (Junior / Elite / Competitive / Private (Coach X)): a family can
+   hold several wallets and a class only takes its own type.
+   Admins also create families, parents and students from here.
 
    Exposes:
      Admin.openStudent(childId, tab)   tab: overview|classes|credits|notes|family
@@ -18,7 +20,8 @@
      level   Junior | Elite | Competitive
      prog    programme id (matches the child's usual classes)
      credit  all | holding | low | none | negative | dormant
-             — filters students by their family's pool
+             — filters students by their family's total credits
+     ctype   credit type id — only families holding that wallet
              (coaches: all | low | none | negative)
      days    dormant threshold in days (default 21, as on Reports)
      sort    name | credits | unutilised (admin) | last | rate
@@ -101,6 +104,28 @@
   function byName(a, b) { return a.name.localeCompare(b.name); }
   function possessive(name) { return name + "'s"; }
   function creditWord(n) { return Math.abs(n) === 1 ? "credit" : "credits"; }
+  function typeName(id) { return db.creditTypeName ? db.creditTypeName(id) : String(id || "credits"); }
+  function typeShort(id) { return db.creditTypeShort ? db.creditTypeShort(id) : typeName(id); }
+
+  // the family's wallets, newest data every call: [{ type, credits }]
+  function wallets(familyId) { return db.balances(familyId, { includeNeeded: false }); }
+
+  // "Junior 8 · Elite 2" for titles and the CSV
+  function walletText(list) {
+    return (list || []).map(function (w) { return typeShort(w.type.id) + " " + w.credits; }).join(" · ");
+  }
+
+  /* Hand a credit adjustment to the credits module. It gained a third
+     argument (the credit type) in v4 — older builds ignore it. */
+  function openAdjust(familyId, mode, creditType) {
+    if (!Admin.can("credits") || !Admin.adjustCreditsModal) {
+      Admin.toast("warn", "Only the studio admin can adjust credits.");
+      return false;
+    }
+    try { Admin.adjustCreditsModal(familyId, mode || undefined, creditType || undefined); }
+    catch (e) { Admin.adjustCreditsModal(familyId, mode || undefined); }
+    return true;
+  }
 
   function tabValid(tab) {
     return TABS.some(function (t) { return t.id === tab; });
@@ -245,6 +270,7 @@
       level: db.levels.indexOf(params.level) >= 0 ? params.level : "all",
       prog: params.prog && HC.getProgramme(params.prog) ? params.prog : "all",
       credit: creditFilters().some(function (f) { return f.id === params.credit; }) ? params.credit : "all",
+      ctype: params.ctype && db.creditType(params.ctype) ? params.ctype : "all",
       sort: sortsFor().some(function (s) { return s.value === params.sort; }) ? params.sort : "name",
       mine: !Admin.isAdmin() && params.all !== "1"
     };
@@ -320,6 +346,7 @@
       var c = r.child;
       if (st.level !== "all" && c.level !== st.level) return false;
       if (st.prog !== "all" && (c.programmes || []).indexOf(st.prog) < 0) return false;
+      if (st.ctype !== "all" && !(r.byType || {})[st.ctype]) return false;
       if (mineIds && !mineIds[c.id]) return false;
       return match(r);
     });
@@ -343,11 +370,13 @@
     var total = data.all.length;
     var rows = data.rows;
 
-    var narrowed = !!String(st.q).trim() || st.level !== "all" || st.prog !== "all" || st.mine || st.credit !== "all";
+    var narrowed = !!String(st.q).trim() || st.level !== "all" || st.prog !== "all" || st.mine ||
+      st.credit !== "all" || st.ctype !== "all";
     var count = !narrowed
       ? "Showing all " + Admin.plural(total, "student")
       : "Showing " + rows.length + " of " + Admin.plural(total, "student") +
         (st.credit !== "all" ? " · " + creditFilter(st.credit).label.toLowerCase() : "") +
+        (st.ctype !== "all" ? " · holding " + typeName(st.ctype) + " credits" : "") +
         (st.mine ? " · only students in your classes" : "");
 
     el.innerHTML =
@@ -395,6 +424,9 @@
           "</div>" +
           '<label class="sr-only" for="stuProg">Programme</label>' +
           '<select class="input stu-select" id="stuProg">' + h.options(progs, st.prog) + "</select>" +
+          '<label class="sr-only" for="stuCtype">Credit type</label>' +
+          '<select class="input stu-select" id="stuCtype" title="Families holding this kind of credit">' +
+            h.creditTypeOptions(st.ctype, { all: true, allLabel: "Any credit type" }) + "</select>" +
           '<label class="sr-only" for="stuSort">Sort by</label>' +
           '<select class="input stu-select" id="stuSort">' + h.options(sortsFor(), st.sort) + "</select>" +
         "</div>" +
@@ -439,6 +471,17 @@
       ["Unutilised", s.unutilised, "available + booked"],
       ["Est. value", fmt.money(s.estValue), "at each family's paid rate"]
     ];
+    var byType = {};
+    var seen2 = {};
+    rows.forEach(function (r) {
+      if (seen2[r.family.id]) return;
+      seen2[r.family.id] = true;
+      (r.wallets || []).forEach(function (w) { if (w.credits > 0) byType[w.type.id] = (byType[w.type.id] || 0) + w.credits; });
+    });
+    var typeRow = Object.keys(byType).length
+      ? '<p class="stu-sum__types">' + h.wallets(db.creditTypes().filter(function (t) { return byType[t.id]; })
+          .map(function (t) { return { type: t, credits: byType[t.id] }; })) + "</p>"
+      : "";
     var label = "Family credit totals: " + Admin.plural(s.families, "family", "families") + " · " + Admin.plural(rows.length, "student") +
       " (siblings share one pool, counted once)";
     return '<dl class="stu-sum" aria-label="' + esc(label) + '" title="' + esc(label) + '">' + cells.map(function (c, i) {
@@ -446,7 +489,7 @@
         '<dt class="stu-sum__k">' + esc(c[0]) + "</dt>" +
         '<dd class="stu-sum__v">' + esc(c[1]) + "</dd>" +
         '<dd class="stu-sum__d">' + esc(c[2]) + "</dd></div>";
-    }).join("") + "</dl>";
+    }).join("") + "</dl>" + typeRow;
   }
 
   function usualShort(ch) {
@@ -483,9 +526,15 @@
   }
 
   function poolTitle(r) {
-    var t = familyLabel(r.family) + "’s credits";
-    if (r.siblings && r.siblings.length) t += ", shared by " + nameList([r.child].concat(r.siblings));
+    var t = familyLabel(r.family) + "’s credits: " + (walletText(r.wallets) || "none");
+    if (r.siblings && r.siblings.length) t += " · shared by " + nameList([r.child].concat(r.siblings));
     return t + (bookedText(r) ? " · " + bookedText(r) : "");
+  }
+
+  // the wallets a family holds, as chips; the total is what sorting uses
+  function walletChips(r) {
+    return h.wallets(r.wallets) +
+      '<span class="sr-only">' + esc(Admin.plural(r.available, "credit") + " in total") + "</span>";
   }
 
   function idleText(r) {
@@ -524,7 +573,7 @@
       '<div class="tbl-wrap"><table class="tbl">' +
         '<caption class="sr-only">Students with their family’s credits, attendance and status</caption>' +
         "<thead><tr>" +
-          th("Student", "name") + th("Level", null, "stu-c-level") + th("Credits", "credits", "num") +
+          th("Student", "name") + th("Level", null, "stu-c-level") + th("Credits", "credits", "stu-c-cred") +
           (isAdmin ? th("Unutilised", "unutilised", "num") + th("Est. value", null, "num") : "") +
           th("Attendance", "rate", "num") + th("Last class", "last") + th("Next class") + th("Status") +
           (canAdjust ? th('Adjust<span class="sr-only"> credits</span>', null, "stu-c-act") : "") +
@@ -545,7 +594,7 @@
             "</td>" +
             '<td class="stu-c-level">' + h.levelChip(ch.level) +
               (usual ? '<div class="cell-sub stu-usual stu-hide-md" title="Usual classes">' + esc(usual) + "</div>" : "") + "</td>" +
-            '<td class="num stu-c-cred" title="' + esc(poolTitle(r)) + '">' + h.credits(r.available) +
+            '<td class="stu-c-cred" title="' + esc(poolTitle(r)) + '">' + walletChips(r) +
               (sub ? '<div class="cell-sub stu-cred-sub' + (r.siblings.length ? " is-shared" : "") + '">' + esc(sub) + "</div>" : "") + "</td>" +
             (isAdmin
               ? '<td class="num"' + famTip + '><span class="stu-unut">' + r.unutilised + "</span></td>" +
@@ -578,8 +627,8 @@
           '<span class="stu-card__top">' + h.avatar(ch.name) +
             '<span class="person__text"><span class="person__name">' + esc(ch.name) + "</span>" +
             '<span class="person__sub">' + whoSub(r) + "</span></span>" +
-            '<span class="stu-card__cred" title="' + esc(poolTitle(r)) + '">' + h.credits(r.available) +
-              '<span class="stu-card__credk">' + esc(sub || "family " + creditWord(r.available)) + "</span></span>" +
+            '<span class="stu-card__cred" title="' + esc(poolTitle(r)) + '">' + walletChips(r) +
+              (sub ? '<span class="stu-card__credk">' + esc(sub) + "</span>" : "") + "</span>" +
           "</span>" +
           '<span class="stu-card__meta">' + h.levelChip(ch.level) +
             '<span class="stu-card__rate">' + rateHtml(r.stats) + (r.stats.rate != null ? " attendance" : "") + "</span>" +
@@ -597,7 +646,7 @@
 
   function listEmptyHtml(st) {
     var actions = [];
-    var filtered = String(st.q).trim() || st.level !== "all" || st.prog !== "all";
+    var filtered = String(st.q).trim() || st.level !== "all" || st.prog !== "all" || st.ctype !== "all";
     if (filtered || st.credit !== "all") {
       actions.push('<button type="button" class="btn btn--ghost btn--sm" id="stuClear">Clear search &amp; filters</button>');
     }
@@ -634,6 +683,8 @@
     });
     var prog = el.querySelector("#stuProg");
     if (prog) prog.addEventListener("change", function () { Admin.setParams({ prog: prog.value === "all" ? "" : prog.value }); });
+    var ctype = el.querySelector("#stuCtype");
+    if (ctype) ctype.addEventListener("change", function () { Admin.setParams({ ctype: ctype.value === "all" ? "" : ctype.value }); });
     var sort = el.querySelector("#stuSort");
     if (sort) sort.addEventListener("change", function () { Admin.setParams({ sort: sort.value === "name" ? "" : sort.value }); });
     el.querySelectorAll("[data-stu-sort]").forEach(function (b) {
@@ -645,7 +696,7 @@
     var clear = el.querySelector("#stuClear");
     if (clear) {
       clear.addEventListener("click", function () {
-        Admin.setParams({ q: "", level: "", prog: "", credit: "", days: "" });
+        Admin.setParams({ q: "", level: "", prog: "", credit: "", ctype: "", days: "" });
         focusId("stuSearch");
       });
     }
@@ -666,11 +717,10 @@
         // the button sits inside a row that opens the student
         e.preventDefault();
         e.stopPropagation();
-        if (!Admin.can("credits") || !Admin.adjustCreditsModal) {
-          Admin.toast("warn", "Only the studio admin can adjust credits.");
-          return;
-        }
-        Admin.adjustCreditsModal(b.getAttribute("data-family"), b.getAttribute("data-stu-adjust"));
+        // one wallet: adjust it directly; several: let the credits module ask which
+        var fid = b.getAttribute("data-family");
+        var held = wallets(fid);
+        openAdjust(fid, b.getAttribute("data-stu-adjust"), held.length === 1 ? held[0].type.id : null);
       });
     }
   }
@@ -685,7 +735,7 @@
   function buildCsv(rows) {
     // credit columns are the FAMILY pool — siblings repeat the same figures
     var head = ["Student", "Age", "Level", "Parent", "Email", "Phone", "Shares credits with",
-      "Family credits available", "Family credits booked", "Family unutilised", "Family est. value (S$)",
+      "Family credits available", "Credits by type", "Family credits booked", "Family unutilised", "Family est. value (S$)",
       "Avg price per credit (S$)", "Attendance %", "Last class", "Idle days", "Next class", "Family credit status"];
     var lines = [head.map(function (x) { return csvCell(x); }).join(",")];
     rows.forEach(function (r) {
@@ -694,7 +744,7 @@
         csvCell(r.child.name, true), csvCell(r.child.age), csvCell(r.child.level),
         csvCell(f.parentName, true), csvCell(f.email, true), csvCell(f.phone, true),
         csvCell(r.siblings.map(function (k) { return k.name; }).join("; "), true),
-        csvCell(r.available), csvCell(r.reserved), csvCell(r.unutilised),
+        csvCell(r.available), csvCell(walletText(r.wallets), true), csvCell(r.reserved), csvCell(r.unutilised),
         csvCell(r.estValue.toFixed(2)), csvCell(r.unitPrice.toFixed(2)),
         csvCell(r.stats.rate == null ? "" : r.stats.rate),
         csvCell(r.lastClass || ""), csvCell(r.idleDays == null ? "" : r.idleDays),
@@ -736,13 +786,13 @@
      STUDENT PROFILE DRAWER
      ============================================================ */
   // ledgerScope: "family" (whole family's history) | "child" (this child's bookings and refunds)
-  var prof = { childId: null, familyId: null, tab: "overview", ledgerAll: false, ledgerScope: "family" };
+  var prof = { childId: null, familyId: null, tab: "overview", ledgerAll: false, ledgerScope: "family", ledgerType: "all" };
 
   Admin.openStudent = function (childId, tab) {
     var ch = db.child(childId);
     if (!ch) { Admin.toast("warn", "Student not found."); return; }
     if (prof.childId !== ch.id) prof.ledgerAll = false;
-    if (prof.familyId !== ch.familyId) prof.ledgerScope = "family";
+    if (prof.familyId !== ch.familyId) { prof.ledgerScope = "family"; prof.ledgerType = "all"; }
     prof.childId = ch.id;
     prof.familyId = ch.familyId;
     prof.tab = tabValid(tab) ? tab : "overview";
@@ -870,12 +920,17 @@
   }
 
   /* ---------- credits card (overview + credits tab) ---------- */
-  function adjustBtn(f) {
+  function adjustBtn(f, typeId, small) {
     if (!Admin.isAdmin()) return "";
-    return Admin.adjustCreditsModal
-      ? '<button type="button" class="btn btn--ghost btn--sm stu-credit__adj" id="stuAdjust" data-stu-act="adjust" data-family="' + esc(f.id) + '"' +
-          ' aria-label="' + esc("Adjust credits for " + familyLabel(f)) + '">' + Admin.icon("wallet") + "Adjust credits</button>"
-      : '<button type="button" class="btn btn--ghost btn--sm stu-credit__adj" disabled title="Credit adjustments are not available yet">' + Admin.icon("wallet") + "Adjust credits</button>";
+    var what = typeId ? typeName(typeId) + " credits for " + familyLabel(f) : "credits for " + familyLabel(f);
+    var cls = small ? "btn btn--quiet btn--xs stu-wallet__adj" : "btn btn--ghost btn--sm stu-credit__adj";
+    if (!Admin.adjustCreditsModal) {
+      return '<button type="button" class="' + cls + '" disabled title="Credit adjustments are not available yet">' +
+        (small ? "" : Admin.icon("wallet")) + "Adjust</button>";
+    }
+    return '<button type="button" class="' + cls + '" id="' + (typeId ? "stuAdjust-" + esc(safeId(typeId)) : "stuAdjust") + '"' +
+      ' data-stu-act="adjust" data-family="' + esc(f.id) + '"' + (typeId ? ' data-ctype="' + esc(typeId) + '"' : "") +
+      ' aria-label="' + esc("Adjust " + what) + '">' + (small ? "" : Admin.icon("wallet")) + "Adjust" + (small ? "" : " credits") + "</button>";
   }
 
   // The family's ONE shared pool. withLink: a link to the Credits tab (needs a child in view).
@@ -890,6 +945,16 @@
         return firstName(k.name) + " " + db.upcomingBookings({ childId: k.id }).length;
       }).join(", ") + ")";
     }
+    var held = wallets(f.id);
+    var shown = held.length ? held : db.balances(f.id); // a new family: show the types its children need
+    var walletRows = '<ul class="stu-wallets">' + shown.map(function (w) {
+      return '<li class="stu-wallet' + (w.credits < 0 ? " is-neg" : w.credits ? "" : " is-zero") + '">' +
+        h.creditChip(w.type.id) +
+        '<span class="stu-wallet__n">' + w.credits + "</span>" +
+        '<span class="stu-wallet__u">' + esc(creditWord(w.credits)) + "</span>" +
+        adjustBtn(f, w.type.id, true) +
+      "</li>";
+    }).join("") + "</ul>";
     var facts = [
       ["Booked, not yet used", booked],
       ["Last top-up", top ? fmt.date(top.at.slice(0, 10), "relative") + " · +" + top.delta + " (" + (LEDGER_TYPES[top.type] || top.type).toLowerCase() + ")" : "None yet"]
@@ -899,15 +964,16 @@
       '<div class="stu-credit__main">' +
         '<p class="stat__k">Family credits</p>' +
         '<p class="stu-credit__n">' + h.credits(r.available) +
-          '<span class="stu-credit__unit">' + creditWord(r.available) + " available</span></p>" +
+          '<span class="stu-credit__unit">' + creditWord(r.available) + " in total</span></p>" +
         '<p class="stu-credit__who">' + esc(familyLabel(f) + (kids.length > 1 ? " · shared by " + nameList(kids) : "")) + "</p>" +
+        walletRows +
         (r.available < 0 ? '<p class="stu-credit__warn">' + esc("Owes " + Admin.plural(-r.available, "credit") + " — follow up on payment.") + "</p>" : "") +
         (isAdmin ? "" : '<p class="stu-credit__hint">Only admins can adjust credits.</p>') +
       "</div>" +
       '<dl class="stu-credit__facts">' + facts.map(function (x) {
         return "<div><dt>" + esc(x[0]) + "</dt><dd>" + esc(x[1]) + "</dd></div>";
       }).join("") + "</dl>" +
-      '<div class="stu-credit__acts">' + adjustBtn(f) +
+      '<div class="stu-credit__acts">' + (shown.length === 1 ? adjustBtn(f, shown[0].type.id) : adjustBtn(f)) +
         (withLink ? '<button type="button" class="btn btn--quiet btn--sm" data-stu-tab="credits">Family credit history' + Admin.icon("chevron-right") + "</button>" : "") +
       "</div>" +
     "</div>";
@@ -1086,7 +1152,11 @@
     db.children(f.id, { includeInactive: true }).forEach(function (k) { kids[k.id] = k; });
     var all = db.ledgerWithBalance(f.id);
     var mineOnly = prof.ledgerScope === "child";
-    var list = mineOnly ? all.filter(function (l) { return l.childId === ch.id; }) : all;
+    var typeId = prof.ledgerType !== "all" && db.creditType(prof.ledgerType) ? prof.ledgerType : "all";
+    var list = all.filter(function (l) {
+      if (mineOnly && l.childId !== ch.id) return false;
+      return typeId === "all" || (l.creditType || "junior") === typeId;
+    });
     var shown = prof.ledgerAll ? list : list.slice(0, LEDGER_PAGE);
     var isAdmin = Admin.isAdmin();
     var name = firstName(ch.name);
@@ -1099,6 +1169,9 @@
         '<button type="button" id="stuLedgerScope-child" data-stu-act="ledger-scope" data-scope="child" aria-pressed="' + mineOnly + '">' +
           esc(name + " only") + '<span class="stu-seg__n">' + nMine + "</span></button>" +
       "</div>" +
+      '<label class="sr-only" for="stuLedgerType">Credit type</label>' +
+      '<select class="input stu-select stu-ledger__type" id="stuLedgerType">' +
+        h.creditTypeOptions(typeId, { all: true, allLabel: "All credit types" }) + "</select>" +
       (mineOnly ? '<p class="stu-hint stu-hint--inline">' + Admin.icon("info") + "<span>" +
         esc(possessive(name) + " bookings and refunds. Purchases and adjustments go to the whole family.") + "</span></p>" : "") +
     "</div>";
@@ -1106,7 +1179,8 @@
     var table = list.length
       ? '<div class="card stu-flush"><div class="tbl-wrap"><table class="tbl stu-ledger">' +
           '<caption class="sr-only">' + esc(familyLabel(f) + " credit history" + (mineOnly ? ", " + possessive(ch.name) + " entries only" : "") + ", newest first") + "</caption>" +
-          '<thead><tr><th scope="col">Date</th><th scope="col">Description</th><th scope="col" class="num">Change</th><th scope="col" class="num">Family balance</th></tr></thead><tbody>' +
+          '<thead><tr><th scope="col">Date</th><th scope="col">Credits</th><th scope="col">Description</th>' +
+            '<th scope="col" class="num">Change</th><th scope="col" class="num">Wallet balance</th></tr></thead><tbody>' +
           shown.map(function (l) {
             var manual = l.type === "manual";
             var kid = l.childId ? kids[l.childId] : null;
@@ -1115,8 +1189,10 @@
             var chip = kid
               ? '<span class="chip chip--' + (kid.id === ch.id ? "info" : "muted") + ' stu-ledger__kid" title="' + esc(kid.name) + '">' + esc(firstName(kid.name)) + "</span>"
               : "";
+            var lt = l.creditType || "junior";
             return '<tr class="stu-ledger__row is-' + esc(l.type) + '">' +
               '<td class="nowrap">' + esc(fmt.date(l.at.slice(0, 10), "relative")) + '<div class="cell-sub">' + esc(fmt.time(l.at.slice(11, 16) || "00:00")) + "</div></td>" +
+              '<td class="stu-ledger__typecell">' + h.creditChip(lt) + "</td>" +
               "<td>" + chip + '<span class="stu-ledger__what">' + esc(ledgerText(l, kid)) + "</span>" +
                 (l.note ? '<div class="stu-ledger__note">“' + esc(l.note) + "”</div>" : "") +
                 '<div class="cell-sub">' +
@@ -1124,13 +1200,16 @@
                   '<span class="stu-ledger__when">' + esc(fmt.stamp(l.at)) + " · </span>" +
                   esc(sub.join(" · ")) + "</div></td>" +
               '<td class="num"><span class="stu-delta ' + (l.delta < 0 ? "is-neg" : "is-pos") + '">' + esc(fmt.signed(l.delta)) + "</span></td>" +
-              '<td class="num">' + h.credits(l.balanceAfter) + "</td>" +
+              '<td class="num" title="' + esc(typeShort(lt) + " wallet after this entry · " + Admin.plural(l.totalAfter, "credit") + " in total") + '">' +
+                h.credits(l.balanceAfter) + '<div class="cell-sub nowrap">' + esc("total " + l.totalAfter) + "</div></td>" +
             "</tr>";
           }).join("") +
         "</tbody></table></div></div>" +
         (list.length > shown.length
           ? '<div class="stu-more"><button type="button" class="btn btn--quiet btn--sm" id="stuLedgerAll" data-stu-act="ledger-all">Show all ' + list.length + " entries</button></div>"
           : "")
+      : typeId !== "all"
+        ? h.empty("wallet", "No " + typeName(typeId) + " entries", esc("Nothing under " + typeName(typeId) + " credits" + (mineOnly ? " for " + name : "") + " yet."), "", "sm")
       : mineOnly
         ? h.empty("wallet", "Nothing for " + name + " yet", esc(name + " hasn't used any of the family's credits yet."), "", "sm")
         : h.empty("wallet", "No credit activity yet", esc(familyLabel(f) + " hasn't bought, used or been given any credits."), "", "sm");
@@ -1242,6 +1321,7 @@
     drawerBound = true;
     d.addEventListener("click", onDrawerClick);
     d.addEventListener("keydown", onDrawerKey);
+    d.addEventListener("change", onDrawerChange);
   }
 
   function onDrawerClick(e) {
@@ -1283,8 +1363,7 @@
         openChildModal({ familyId: t.getAttribute("data-family") });
         break;
       case "adjust":
-        if (!Admin.can("credits") || !Admin.adjustCreditsModal) { Admin.toast("warn", "Only the studio admin can adjust credits."); return; }
-        Admin.adjustCreditsModal(t.getAttribute("data-family") || prof.familyId);
+        openAdjust(t.getAttribute("data-family") || prof.familyId, t.getAttribute("data-mode"), t.getAttribute("data-ctype"));
         break;
       case "ledger-scope":
         prof.ledgerScope = t.getAttribute("data-scope") === "child" ? "child" : "family";
@@ -1297,6 +1376,16 @@
         Admin.refresh();
         break;
     }
+  }
+
+  // the Credits tab's credit-type filter (a select, so not a click)
+  function onDrawerChange(e) {
+    var t = e.target;
+    if (!t || t.id !== "stuLedgerType") return;
+    prof.ledgerType = t.value || "all";
+    prof.ledgerAll = false;
+    Admin.refresh();
+    focusId("stuLedgerType");
   }
 
   // arrow keys move between profile tabs
@@ -1642,10 +1731,13 @@
     if (sel && (sel.status !== "open" || sel.started)) { bk.key = null; sel = null; }
 
     var f = db.family(ch.familyId) || {};
-    var bal = db.balance(ch.familyId); // the family's shared pool
+    var held = wallets(ch.familyId);
+    // a class takes its own kind of credit — show the wallet that pays for the pick
+    var bal = sel ? db.balance(ch.familyId, sel.creditType) : db.balance(ch.familyId);
     var sub = document.getElementById("stuBookSub");
     if (sub) {
-      sub.innerHTML = esc(ch.level + " · " + familyLabel(f) + " has ") + h.credits(bal) + " " + esc(creditWord(bal));
+      sub.innerHTML = esc(ch.level + " · " + familyLabel(f) + ": ") +
+        (held.length ? h.wallets(held) : '<span class="muted">no credits</span>');
     }
     Admin.keepFocus(root, function () { root.innerHTML = bookHtml(ch, sel, bal); });
 
@@ -1719,7 +1811,10 @@
     var full = o.spotsLeft <= 0;
     var fits = db.levelFits(ch, o.programme);
     var usual = (ch.programmes || []).indexOf(o.programmeId) >= 0;
-    var chips = [];
+    var typeId = o.creditType || db.creditTypeFor(o);
+    var wallet = db.balance(ch.familyId, typeId);
+    var chips = [h.creditChip(typeId, wallet)];
+    if (wallet < o.cost) chips.push(h.chip("No " + typeShort(typeId) + " credits", "warn", "This class takes " + typeName(typeId) + " credits"));
     if (booked) chips.push(h.chip("Already booked", "info"));
     if (full) chips.push(h.chip("Full", "warn"));
     if (usual) chips.push(h.chip("Usual class", "ok"));
@@ -1732,7 +1827,7 @@
     var spots = full
       ? "Full · " + o.booked + " of " + o.capacity
       : Admin.plural(o.spotsLeft, "spot") + " left of " + o.capacity;
-    return '<label class="choice stu-choice' + (booked ? " is-booked" : "") + '">' +
+    return '<label class="choice stu-choice' + (booked ? " is-booked" : "") + (wallet < o.cost ? " is-short" : "") + '">' +
       '<input type="radio" name="stuBookOcc" id="stuBk-' + safeId(o.key) + '" value="' + esc(o.key) + '"' +
         (o.key === bk.key && !booked ? " checked" : "") + (booked ? " disabled" : "") + " />" +
       '<span class="stu-choice__body">' +
@@ -1755,18 +1850,23 @@
     var after = bal - (charge ? sel.cost : 0);
     var name = firstName(ch.name);
     var f = db.family(ch.familyId) || {};
+    var typeId = sel.creditType || db.creditTypeFor(sel);
+    var typeLabel = sel.creditTypeName || typeName(typeId);
 
     var out = '<div class="stu-book__opts">' +
       '<p class="stu-book__summary">' + Admin.icon("calendar") + "<span><strong>" + esc(name) + "</strong> → " +
         esc(sel.name + ", " + fmt.date(sel.date, "full") + ", " + fmt.timeRange(sel) + " with " + sel.coach) + "</span></p>" +
       '<label class="check"><input type="checkbox" id="stuBkCharge"' + (charge ? " checked" : "") + (canCredits ? "" : " disabled") + " />" +
-        "<span><strong>Deduct " + esc(Admin.plural(sel.cost, "credit")) + "</strong> from the family credits — " + h.credits(bal) + " → " + h.credits(after) +
+        "<span><strong>Deduct " + esc(sel.cost + " " + typeShort(typeId) + " " + creditWord(sel.cost)) + "</strong> — " +
+        esc(typeLabel) + " " + h.credits(bal) + " → " + h.credits(after) +
         (canCredits ? "" : '<br /><span class="field__hint">Only admins can book without deducting credits.</span>') + "</span></label>";
 
     if (needNeg) {
-      out += '<label class="check stu-must' + (bk.invalid === "stuBkNeg" ? " is-invalid" : "") + '"><input type="checkbox" id="stuBkNeg"' + (bk.allowNegative ? " checked" : "") + " />" +
-        "<span><strong>Allow negative balance</strong> — " + esc(familyLabel(f) + " has " + Admin.plural(bal, "credit") +
-        ", so this takes the family to " + after + ". Follow up with " + (f.parentName || "the parent") + " about payment.") + "</span></label>";
+      out += h.notice("warn", "<p><strong>" + esc("No " + typeShort(typeId) + " credits left") + "</strong> — " +
+          esc(shortText(f, typeId, bal)) + " Buy or add credits first.</p>") +
+        '<label class="check stu-must' + (bk.invalid === "stuBkNeg" ? " is-invalid" : "") + '"><input type="checkbox" id="stuBkNeg"' + (bk.allowNegative ? " checked" : "") + " />" +
+        "<span><strong>Book anyway</strong> — " + esc("this takes " + possessive(familyLabel(f)) + " " + typeLabel + " credits to " + after +
+        ". Follow up with " + (f.parentName || "the parent") + " about payment.") + "</span></label>";
     }
     if (full) {
       out += '<label class="check stu-must' + (bk.invalid === "stuBkOver" ? " is-invalid" : "") + '"><input type="checkbox" id="stuBkOver"' + (bk.allowFull ? " checked" : "") + " />" +
@@ -1777,6 +1877,11 @@
     }
     if (bk.error) out += h.notice("warn", esc(bk.error));
     return out + "</div>";
+  }
+
+  // "Jane Tan's family has 0 Elite credits." / "…has 1 Elite credit, this class takes 2."
+  function shortText(f, typeId, bal) {
+    return familyLabel(f) + " has " + bal + " " + typeShort(typeId) + " " + creditWord(bal) + ".";
   }
 
   function onBookClick(e) {
@@ -1838,10 +1943,11 @@
     bk.invalid = null;
     if (!sel) { bk.error = "Pick a class first."; paintBook(); return; }
     var charge = Admin.can("credits") ? bk.charge : true;
-    var needNeg = charge && db.balance(ch.familyId) < sel.cost;
+    var typeId = sel.creditType || db.creditTypeFor(sel);
+    var needNeg = charge && db.balance(ch.familyId, typeId) < sel.cost;
     var needFull = sel.spotsLeft <= 0;
     if (needNeg && !bk.allowNegative) {
-      bk.error = "Not enough family credits — tick “Allow negative balance” to book anyway.";
+      bk.error = "No " + typeShort(typeId) + " credits left — buy or add credits first, or tick “Book anyway”.";
       bk.invalid = "stuBkNeg";
       paintBook();
       focusId("stuBkNeg");
@@ -1868,7 +1974,7 @@
       return;
     }
     bk.booked.push(sel.name + " · " + fmt.date(sel.date, "full") + ", " + fmt.time(sel.time) +
-      (charge ? " · " + Admin.plural(sel.cost, "credit") + " deducted" : " · no credit charged"));
+      (charge ? " · " + sel.cost + " " + typeShort(typeId) + " " + creditWord(sel.cost) + " deducted" : " · no credit charged"));
     bk.key = null;
     bk.allowNegative = false;
     bk.allowFull = false;

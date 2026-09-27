@@ -35,6 +35,7 @@
     { id: "students", label: "Students", icon: "users" },
     { id: "coaches",  label: "Coaches",  icon: "whistle",  adminOnly: true },
     { id: "credits",  label: "Credits",  icon: "wallet",   adminOnly: true },
+    { id: "packages", label: "Packages", icon: "tag",      adminOnly: true },
     { id: "reports",  label: "Reports",  icon: "chart",    adminOnly: true }
   ];
 
@@ -89,6 +90,32 @@
     money: function (n) {
       return "S$" + Number(n || 0).toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     },
+    // "Junior ◆8" — a wallet, or just the type when credits are omitted
+    creditChip: function (typeId, credits, extraKind) {
+      var t = db.creditType(typeId);
+      var kind = t && t.kind === "private" ? "sub" : typeId === "elite" ? "elite"
+        : typeId === "competitive" ? "competitive" : "junior";
+      return '<span class="chip chip--' + (extraKind || kind) + ' chip--credit" title="' +
+        esc(t ? t.name : "Credits") + '">' + esc(t ? (t.short || t.name) : "Credits") +
+        (credits == null ? "" : ' <b>' + credits + "</b>") + "</span>";
+    },
+
+    // every wallet a family holds: [{ type, credits }] from HC.db.balances()
+    wallets: function (list, opts) {
+      opts = opts || {};
+      if (!list || !list.length) return '<span class="muted">No credits</span>';
+      return '<span class="chips">' + list.map(function (w) {
+        return Admin.h.creditChip(w.type.id, w.credits);
+      }).join("") + "</span>";
+    },
+
+    creditTypeOptions: function (selected, opts) {
+      opts = opts || {};
+      var list = db.creditTypes().map(function (t) { return { value: t.id, label: t.name }; });
+      if (opts.all) list.unshift({ value: "all", label: opts.allLabel || "All credit types" });
+      return Admin.h.options(list, selected);
+    },
+
     credits: function (n) { return Admin.plural(n, "credit"); },
     signed: function (n) { return (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n); },
     timeRange: function (occ) { return HC.formatTime(occ.time) + " – " + HC.formatTime(occ.endTime); }
@@ -309,6 +336,7 @@
     more: '<circle cx="5.5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18.5" cy="12" r="1.3" fill="currentColor"/>',
     edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
     list: '<path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+    tag: '<path d="M3 12.5V4.5a1 1 0 0 1 1-1h8l8.5 8.5a1.5 1.5 0 0 1 0 2.1l-6.4 6.4a1.5 1.5 0 0 1-2.1 0z"/><circle cx="7.5" cy="8" r="1.3" fill="currentColor" stroke="none"/>',
     whistle: '<circle cx="8.5" cy="14.5" r="5"/><path d="M11.5 10.5L20 6.5v4.5h-5.8M8.5 14.5h.01M4 5l2 2M8 3v2.5"/>'
   };
 
@@ -531,7 +559,8 @@
     { icon: "ban", title: "Block, delete or re-staff", text: "Schedule → <strong>⋯</strong> on a class: block it, delete one date (or end a weekly class), or give it to another coach." },
     { icon: "plus", title: "One-off classes", text: "Schedule → <strong>Add one-off class</strong>. It appears on that date only; the weekly timetable doesn’t change." },
     { icon: "whistle", title: "Coaches", text: "Add or edit coaches, decide who can log in, and hand weekly classes to another coach." },
-    { icon: "wallet", title: "Credits", text: "Each family has one credit balance shared by its children. Credits → <strong>Deduct</strong> or <strong>Add</strong>; every change is logged in the family’s history." },
+    { icon: "wallet", title: "Credits", text: "A family’s credits are shared by its children, and each kind of credit books its own classes — Junior, Elite, Competitive or Private with one coach." },
+    { icon: "tag", title: "Packages", text: "Set what parents can buy: name, which credits it gives, how many and the price. Old packages are taken off sale, never deleted." },
     { icon: "users", title: "Students", text: "Every student with their credits, attendance and status (dormant, low, negative) in one list." },
     { icon: "chart", title: "Reports", text: "Credits not yet used — available and already booked — with an estimated value and a CSV export." }
   ];

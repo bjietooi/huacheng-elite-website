@@ -32,6 +32,8 @@
   var MONTHS_BACK = 2;       // calendar range around the current month
   var MONTHS_AHEAD = 6;
   var FLASH_MS = 2400;
+  var FIRST_MIN = 10 * 60;   // studio hours, as offered by Admin.h.timeOptions
+  var LAST_MIN = 21 * 60 + 30;
 
   // module UI state (views re-render at any time)
   var ui = {
@@ -98,10 +100,41 @@
     return out;
   }
 
-  // Classes this leave is blocking and the bookings it refunded.
+  /* ---------- time windows (part of a day) ---------- */
+  // "4:00 PM – 6:00 PM"; the store words an all-day entry for us.
+  function windowLabel(w) { return fmt.time(w.from) + " – " + fmt.time(w.to); }
+
+  function overlaps(a, b) {
+    return db.toMinutes(a.from) < db.toMinutes(b.to) && db.toMinutes(b.from) < db.toMinutes(a.to);
+  }
+
+  // The leave already booked that a new entry would clash with, or null.
+  // A whole day clashes with anything; two part-days only when they overlap.
+  function clashOn(coach, date, w) {
+    return db.leavesOn(coach, date).filter(function (l) {
+      if (!w || l.allDay) return true;
+      return overlaps(w, { from: l.from, to: l.to });
+    })[0] || null;
+  }
+
+  // A sensible two-hour window: from the coach's next class that day, and
+  // after any leave they have already booked.
+  function defaultWindow(coach, date) {
+    var next = db.occurrencesForDate(date, { coach: coach }).filter(function (o) {
+      return o.status === "open" && !o.started;
+    })[0];
+    var start = next ? db.toMinutes(next.time) : 16 * 60;
+    db.leavesOn(coach, date).forEach(function (l) {
+      if (!l.allDay) start = Math.max(start, db.toMinutes(l.to));
+    });
+    start = Math.max(FIRST_MIN, Math.min(start, LAST_MIN - 60));
+    return { from: db.fromMinutes(start), to: db.fromMinutes(Math.min(start + 120, LAST_MIN)) };
+  }
+
+  // Classes this leave entry is blocking and the bookings it refunded.
   function impactOf(lv) {
     var classes = db.occurrencesForDate(lv.date, { coach: lv.coach }).filter(function (o) {
-      return o.status === "blocked" && o.blockKind === "leave";
+      return o.status === "blocked" && o.blockKind === "leave" && o.leaveId === lv.id;
     });
     var refunded = 0;
     classes.forEach(function (o) {
@@ -115,7 +148,8 @@
   /* ============================================================
      LIST
      ============================================================ */
-  function leaveItem(lv, past) {
+  // One entry (a whole day, or one time window) inside its date's card.
+  function leaveEntry(lv, past) {
     var imp = impactOf(lv);
     var canCancel = !past && Admin.can("leave", lv.coach);
     var flashing = ui.flash && ui.flash.id === lv.id && Date.now() < ui.flash.until;
@@ -123,7 +157,7 @@
     var impactText = imp.classes.length
       ? Admin.plural(imp.classes.length, "class", "classes") + (past ? " were blocked" : " blocked") +
         " · " + Admin.plural(imp.refunded, "booking") + " refunded"
-      : "No classes that day";
+      : lv.allDay ? "No classes that day" : "No classes in that time";
 
     var chips = imp.classes.map(function (o) {
       return '<button type="button" class="leave-occ" data-open-class="' + esc(o.key) + '"' +
@@ -134,35 +168,68 @@
         "</button>";
     }).join("");
 
-    return '<article class="leave-item' + (past ? " leave-item--past" : "") + (flashing ? " is-flash" : "") +
-        '" id="leave-' + esc(lv.id) + '" tabindex="-1" aria-label="' + esc(fmt.date(lv.date, "long") + (Admin.isAdmin() ? ", " + lv.coach : "")) + '">' +
+    var when = lv.allDay
+      ? h.chip("All day", past ? "muted" : "info")
+      : '<span class="leave-entry__window">' + Admin.icon("clock") + esc(windowLabel(lv)) + "</span>";
+
+    return '<section class="leave-entry' + (flashing ? " is-flash" : "") + '" id="leave-' + esc(lv.id) + '" tabindex="-1"' +
+        ' aria-label="' + esc([fmt.date(lv.date), db.leaveLabel(lv), lv.reason || "No reason given"]
+          .concat(Admin.isAdmin() ? [lv.coach] : []).join(" · ")) + '">' +
+        '<div class="leave-entry__top">' +
+          when +
+          '<p class="leave-entry__reason">' + (lv.reason ? esc(lv.reason) : '<span class="muted">No reason given</span>') + "</p>" +
+          (canCancel
+            ? '<button type="button" class="btn btn--danger btn--sm leave-entry__cancel" data-cancel-leave="' + esc(lv.id) +
+                '" id="lvCancel-' + esc(lv.id) + '" aria-label="' + esc("Cancel leave on " + fmt.date(lv.date) + ", " + db.leaveLabel(lv)) + '">' +
+                Admin.icon("undo") + "Cancel leave</button>"
+            : "") +
+        "</div>" +
+        '<p class="leave-item__by">Booked by ' + esc(db.actorName(lv.by)) + " · " + esc(fmt.stamp(lv.at)) + "</p>" +
+        '<div class="leave-item__impact">' +
+          '<p class="leave-item__impact-t">' + Admin.icon(imp.classes.length ? "ban" : "check") + esc(impactText) + "</p>" +
+          (chips ? '<div class="leave-item__occs">' + chips + "</div>" : "") +
+        "</div>" +
+      "</section>";
+  }
+
+  // A day's card: the date, the coach (admin) and every entry booked that day.
+  function leaveItem(group, past) {
+    var date = group.date;
+    return '<article class="leave-item' + (past ? " leave-item--past" : "") +
+        '" id="leaveDay-' + esc(date + "-" + group.coach.replace(/\W+/g, "-")) + '">' +
         '<div class="leave-item__date" aria-hidden="true">' +
-          '<span class="leave-item__dow">' + esc(HC.dayShort[db.dayIndex(lv.date)]) + "</span>" +
-          '<span class="leave-item__day">' + esc(+lv.date.slice(8, 10)) + "</span>" +
-          '<span class="leave-item__mon">' + esc(shortMonth(lv.date)) + "</span>" +
+          '<span class="leave-item__dow">' + esc(HC.dayShort[db.dayIndex(date)]) + "</span>" +
+          '<span class="leave-item__day">' + esc(+date.slice(8, 10)) + "</span>" +
+          '<span class="leave-item__mon">' + esc(shortMonth(date)) + "</span>" +
         "</div>" +
         '<div class="leave-item__top">' +
-          '<h3 class="leave-item__title">' + esc(fmt.date(lv.date, "long")) + "</h3>" +
-          h.chip(relative(lv.date), past ? "muted" : "info") +
+          '<h3 class="leave-item__title">' + esc(fmt.date(date, "long")) + "</h3>" +
+          h.chip(relative(date), past ? "muted" : "info") +
+          (group.items.length > 1 ? h.chip(Admin.plural(group.items.length, "time off"), "muted") : "") +
         "</div>" +
-        (canCancel
-          ? '<div class="leave-item__actions">' +
-              '<button type="button" class="btn btn--danger btn--sm" data-cancel-leave="' + esc(lv.id) + '" id="lvCancel-' + esc(lv.id) + '">' +
-                Admin.icon("undo") + "Cancel leave</button>" +
-            "</div>"
-          : "") +
         '<div class="leave-item__body">' +
           (Admin.isAdmin()
-            ? '<p class="leave-item__coach">' + h.avatar(lv.coach, "sm") + "<span>" + esc(lv.coach) + "</span></p>"
+            ? '<p class="leave-item__coach">' + h.avatar(group.coach, "sm") + "<span>" + esc(group.coach) + "</span></p>"
             : "") +
-          '<p class="leave-item__reason">' + (lv.reason ? esc(lv.reason) : '<span class="muted">No reason given</span>') + "</p>" +
-          '<p class="leave-item__by">Booked by ' + esc(db.actorName(lv.by)) + " · " + esc(fmt.stamp(lv.at)) + "</p>" +
-          '<div class="leave-item__impact">' +
-            '<p class="leave-item__impact-t">' + Admin.icon(imp.classes.length ? "ban" : "check") + esc(impactText) + "</p>" +
-            (chips ? '<div class="leave-item__occs">' + chips + "</div>" : "") +
-          "</div>" +
+          '<div class="leave-entries">' + group.items.map(function (lv) { return leaveEntry(lv, past); }).join("") + "</div>" +
         "</div>" +
       "</article>";
+  }
+
+  // Entries → one group per coach and date, whole days first inside a day.
+  function groupByDay(list) {
+    var out = [], byKey = {};
+    list.forEach(function (lv) {
+      var k = lv.date + "|" + lv.coach;
+      if (!byKey[k]) { byKey[k] = { date: lv.date, coach: lv.coach, items: [] }; out.push(byKey[k]); }
+      byKey[k].items.push(lv);
+    });
+    out.forEach(function (g) {
+      g.items.sort(function (a, b) {
+        return (a.allDay ? 0 : 1) - (b.allDay ? 0 : 1) || String(a.from).localeCompare(String(b.from));
+      });
+    });
+    return out;
   }
 
   function renderList(today) {
@@ -188,7 +255,9 @@
             " Pick a date on the calendar or use <strong>Book leave</strong>.",
             '<button type="button" class="btn btn--primary btn--sm" data-leave-add id="lvAddEmpty">' + Admin.icon("plus") + "Book leave</button>");
     } else {
-      body = '<div class="leave-items">' + list.map(function (lv) { return leaveItem(lv, ui.tab === "past"); }).join("") + "</div>";
+      body = '<div class="leave-items">' + groupByDay(list).map(function (g) {
+        return leaveItem(g, ui.tab === "past");
+      }).join("") + "</div>";
     }
 
     return '<section class="leave-list">' + tabs +
@@ -230,8 +299,10 @@
       cells += dayCell(d, today, byDate[d] || [], coach, active);
     }
 
+    var days = {};
+    monthLeaves.forEach(function (l) { days[l.date + "|" + l.coach] = 1; });
     var sub = monthLeaves.length
-      ? Admin.plural(monthLeaves.length, "leave day") + " this month"
+      ? Admin.plural(Object.keys(days).length, "leave day") + " this month"
       : "No leave this month";
 
     return '<section class="card leave-cal" aria-labelledby="lvCalTitle">' +
@@ -251,8 +322,8 @@
         '<div class="card__body">' +
           '<div class="leave-cal__grid" id="lvCalGrid">' + head + cells + "</div>" +
           '<div class="legend leave-cal__legend">' +
-            '<span><i class="leave-cal__key leave-cal__key--leave"></i>' + (coach ? "On leave" : "All coaches off") + "</span>" +
-            (coach ? "" : '<span><i class="leave-cal__key leave-cal__key--partial"></i>Some coaches off</span>') +
+            '<span><i class="leave-cal__key leave-cal__key--leave"></i>' + (coach ? "Whole day off" : "All coaches off all day") + "</span>" +
+            '<span><i class="leave-cal__key leave-cal__key--part"></i>Part of the day' + (coach ? "" : " / some coaches off") + "</span>" +
             '<span><i class="leave-cal__key leave-cal__key--today"></i>Today</span>' +
             "<span>Pick a future date to book leave</span>" +
           "</div>" +

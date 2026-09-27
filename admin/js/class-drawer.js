@@ -14,8 +14,10 @@
      credit when removing): admins only. Coaches always charge,
      and a removal refunds only before the class starts.
 
-   Credits are one pool per family, shared by brothers and sisters:
-   every balance shown here is the family's ("Jane Tan's family").
+   Credits are the family's, shared by brothers and sisters, and each
+   class takes ONE KIND of credit (Junior / Elite / Competitive /
+   Private with one coach). Balances shown here are the family's
+   wallet for THIS class's type ("Jane Tan's family · Elite ◆4").
 
    The core re-runs render() after every HC.db change, so the
    drawer is derived from the store plus the small UI state
@@ -86,7 +88,50 @@
     return "Shared by " + kids.slice(0, -1).join(", ") + " & " + kids[kids.length - 1];
   }
 
-  function poolTitle(f) { return sharedBy(f && f.id) || (f && f.parentName ? f.parentName + "'s family credits" : "Family credits"); }
+  /* ---------- credit types: a class takes one kind of credit ---------- */
+  function typeOf(occ) { return (occ && occ.creditType) || (occ && db.creditTypeFor(occ)) || ""; }
+
+  // "Elite" on a chip, "Private (Coach A)" spelled out for private credits
+  function typeShort(typeId) {
+    var t = db.creditType(typeId);
+    if (!t) return "Credits";
+    return t.kind === "private" ? "Private" : (t.short || t.name);
+  }
+
+  function typeName(typeId) {
+    var t = db.creditType(typeId);
+    return t ? t.name : "Credits";
+  }
+
+  // "1 Elite credit" · "2 Junior credits" · "1 Private (Coach A) credit"
+  function creditWord(typeId, n) {
+    var t = db.creditType(typeId);
+    var label = t ? (t.kind === "private" ? t.name : (t.short || t.name)) : "";
+    return n + (label ? " " + label : "") + (n === 1 ? " credit" : " credits");
+  }
+
+  // the family's wallet for this class, e.g. "Elite ◆4"
+  function typedBalance(familyId, typeId) {
+    return '<span class="cd-bal__t">' + esc(typeShort(typeId)) + "</span> " + h.credits(db.balance(familyId, typeId));
+  }
+
+  // tooltip: whose credits these are, their other wallets and who shares them
+  function walletsTitle(f, typeId) {
+    var bits = [f && f.parentName ? f.parentName + "'s family" : "This family"];
+    var others = (f && f.id ? db.balances(f.id) : []).filter(function (w) { return w.type.id !== typeId; });
+    bits.push(others.length
+      ? "Other credits: " + others.map(function (w) { return w.type.name + " " + w.credits; }).join(", ")
+      : "No other credits");
+    var shared = sharedBy(f && f.id);
+    if (shared) bits.push(shared);
+    return bits.join(" · ");
+  }
+
+  /* ---------- private 1-to-1 sessions ---------- */
+  function isPrivate(occ) {
+    var prog = occ && occ.programme;
+    return !!((prog && prog.tier === "private") || (occ && occ.programmeId === "private"));
+  }
 
   function opensAt(occ) {
     return "Attendance opens " + (occ.isToday ? "" : "on " + fmt.date(occ.date) + " ") + "at " + fmt.time(occ.time);
@@ -251,7 +296,8 @@
         '<p class="cd-meta">Blocked by ' + whoWhen(occ.statusBy, occ.statusAt) + "</p>"));
     }
 
-    if (occ.oneOff) out.push(oneOffNotice(occ));
+    if (isPrivate(occ)) out.push(privateNotice(occ));
+    if (occ.oneOff && (occ.groupId || !isPrivate(occ))) out.push(oneOffNotice(occ));
 
     if (occ.substituted) {
       out.push(h.notice("info",
@@ -261,6 +307,14 @@
 
     if (!out.length) return "";
     return '<div class="drawer__section cd-status">' + out.join("") + "</div>";
+  }
+
+  // A one-to-one session: one student, the coach's own credits
+  function privateNotice(occ) {
+    return h.notice("info",
+      "<p><strong>Private 1-to-1 with " + esc(occ.coach) + "</strong> — one student, " +
+        esc(fmt.timeRange(occ)) + ".</p>" +
+      '<p class="cd-meta">Booked with ' + esc(typeName(typeOf(occ))) + " credits — they can't be used for group classes.</p>");
   }
 
   function groupOf(occ) { return occ.groupId && db.oneOffGroup ? db.oneOffGroup(occ.groupId) : null; }
@@ -351,7 +405,7 @@
   function summarySection(occ, active) {
     return '<div class="drawer__section cd-summary">' +
         stateBar(occ, active) +
-        '<div class="cd-sums">' + sumCells(occ) + "</div>" +
+        '<div class="cd-sums' + (isPrivate(occ) ? " cd-sums--two" : "") + '">' + sumCells(occ) + "</div>" +
       "</div>";
   }
 
@@ -384,6 +438,21 @@
   }
 
   function sumCells(occ) {
+    var typeId = typeOf(occ);
+    var cost = sumCell("Credit cost",
+      '<strong class="cd-sum__cred">' + h.credits(occ.cost) + "</strong>",
+      '<span class="cd-sum__d cd-sum__type">' + h.creditChip(typeId) +
+        "<span>" + (isPrivate(occ) ? "for this coach" : "per student") + "</span></span>");
+
+    // a private session has one seat: show who it is for instead of the places
+    if (isPrivate(occ)) {
+      var who = occ.booked ? (db.roster(occ.key)[0] || {}).child : null;
+      return sumCell("Student",
+          "<strong>" + esc(who ? firstName(who.name) : "—") + "</strong>",
+          '<span class="cd-sum__d">' + (who ? "one-to-one session" : "no one booked yet") + "</span>") +
+        cost;
+    }
+
     var over = occ.booked > occ.capacity;
     var full = occ.booked >= occ.capacity;
     var pct = occ.capacity ? Math.min(100, Math.round((occ.booked / occ.capacity) * 100)) : 0;
@@ -397,9 +466,7 @@
         over ? '<span class="cd-sum__d cd-sum__d--warn">' + (occ.booked - occ.capacity) + " over capacity</span>"
           : full ? '<span class="cd-sum__d cd-sum__d--warn">Class is full</span>'
           : '<span class="cd-sum__d">of ' + occ.capacity + " places</span>") +
-      sumCell("Credit cost",
-        '<strong class="cd-sum__cred">' + h.credits(occ.cost) + "</strong>",
-        '<span class="cd-sum__d">per student</span>');
+      cost;
   }
 
   function sumCell(label, value, detail) {
@@ -466,13 +533,17 @@
         ' title="' + esc(Admin.plural(occ.unmarked, "student") + " not marked yet") + '">' +
         icon("check") + "Mark all unmarked present</button>");
     }
-    if (manage && occ.status !== "removed") {
+    var privateTaken = isPrivate(occ) && active.length > 0;
+    if (manage && occ.status !== "removed" && !privateTaken) {
       var closedWhy = occ.status === "open" ? ""
         : occ.blockKind === "leave" ? "The coach is on leave — students can't be added"
         : "Reopen the class to add students";
       tools.push('<button type="button" class="btn btn--primary btn--sm" id="cdAddStudent" data-cd-action="assign"' +
         (closedWhy ? ' disabled title="' + esc(closedWhy) + '"' : "") + ">" +
-        icon("plus") + "Add student</button>");
+        icon("plus") + (isPrivate(occ) ? "Add the student" : "Add student") + "</button>");
+    }
+    if (manage && privateTaken && occ.status === "open" && !occ.started) {
+      info.push(hint("info", "A private session is for one student. Remove them first to give the slot to someone else."));
     }
 
     if (!occ.started && manage && active.length && occ.status === "open") {
@@ -518,12 +589,18 @@
     }
 
     return section("cdStudentsTitle",
-      'Students <span class="cd-count">(' + active.length + ")</span>", html, "cd-students");
+      (isPrivate(occ) ? "Student" : "Students") + ' <span class="cd-count">(' + active.length + ")</span>",
+      html, "cd-students");
   }
 
   function emptyText(occ, manage) {
     if (occ.status === "removed") return "Any bookings were cancelled and refunded when the class was deleted.";
     if (occ.status === "blocked") return "This class is closed to bookings.";
+    if (isPrivate(occ)) {
+      return occ.started ? "Nobody came to this session."
+        : manage ? "No one is booked yet — add the student this session is for."
+        : "No one is booked into this session yet.";
+    }
     if (occ.started) return manage ? "Use “Add student” to record a walk-in." : "Nobody was booked into this class.";
     return manage ? "Parents can book from the portal, or add a student yourself." : "Parents can book from the portal.";
   }
@@ -553,7 +630,7 @@
       : "";
 
     var source = b.source === "staff" ? "Added by " + actor(b.by) : "Booked by parent";
-    var meta = '<span class="cd-bal" title="' + esc(poolTitle(f)) + '">Family credits ' + h.credits(r.balance) + "</span>" +
+    var meta = '<span class="cd-bal" title="' + esc(walletsTitle(f, typeOf(occ))) + '">' + typedBalance(f.id, typeOf(occ)) + "</span>" +
       '<span title="' + esc(fmt.stamp(b.at)) + '">' + esc(source) + (b.cost ? "" : " · no credit charged") + "</span>";
 
     // controls: attendance (or a read-only chip) + remark + remove
@@ -625,7 +702,10 @@
   function cancelledRow(r) {
     var b = r.booking, ch = r.child;
     var chips = [h.chip("Cancelled", "muted")];
-    if (b.refunded) chips.push(h.chip("Refunded", "ok", Admin.plural(b.cost, "credit") + " returned to " + familyLabel(r.family)));
+    if (b.refunded) {
+      chips.push(h.chip("Refunded", "ok",
+        creditWord(b.creditType || db.creditTypeFor({ programmeId: b.programmeId }), b.cost) + " returned to " + familyLabel(r.family)));
+    }
     else if (b.cost > 0) chips.push(h.chip("Not refunded", "warn"));
     else chips.push(h.chip("No charge", "muted"));
     return '<li class="cd-stu is-cancelled">' +
@@ -745,7 +825,7 @@
       return;
     }
     var f = db.family(b.familyId) || {};
-    var cost = fmt.credits(b.cost);
+    var cost = creditWord(b.creditType || typeOf(occ), b.cost);
     var credit;
     if (!(b.cost > 0)) {
       credit = '<p class="field__hint cd-confirm-hint">No credit was charged for this booking.</p>';
@@ -787,7 +867,7 @@
         by: Admin.by(), refund: refund, reason: "Removed by staff", notify: true
       });
       Admin.check(res, "Removed " + ch.name + " from " + now.name +
-        (res && res.booking && res.booking.refunded ? " — " + fmt.credits(res.booking.cost) + " back to " + familyLabel(f) + "." : "."));
+        (res && res.booking && res.booking.refunded ? " — " + cost + " back to " + familyLabel(f) + "." : "."));
     });
   }
 

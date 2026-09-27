@@ -2,9 +2,10 @@
    HUACHENG ELITE — Coach & Admin console · credits (admin only)
    ------------------------------------------------------------
    Manual credit changes — what the studio does by hand in
-   WordPress today. Credits are SHARED by the family: one pool
-   any of the parent's children can use, so every change here is
-   for one family.
+   WordPress today. Credits are SHARED by the family, and each
+   credit belongs to a TYPE (Junior / Elite / Competitive /
+   Private with one coach) that only books that kind of class —
+   so every change here is for one family's one wallet.
 
    The page: a short explainer, the families who need a top-up,
    and the manual adjustment log. Every student with their
@@ -35,7 +36,7 @@
   var RESULT_LIMIT = 6;
 
   /* ---------- view state (survives re-renders) ---------- */
-  var ui = { month: "all", fresh: null, reveal: false };
+  var ui = { month: "all", creditType: "all", fresh: null, reveal: false };
 
   /* ============================================================
      HELPERS
@@ -45,6 +46,11 @@
   function firstName(name) { return String(name || "").trim().split(/\s+/)[0] || ""; }
 
   function credits(n) { return Admin.plural(n, "credit"); }
+
+  function typeShort(id) { return db.creditTypeShort(id); }
+
+  // "3 Elite credits" — a wallet in words
+  function walletWords(typeId, n) { return n + " " + typeShort(typeId) + (Math.abs(n) === 1 ? " credit" : " credits"); }
 
   function canOpen() { return !!Admin.openFamily; }
 
@@ -75,10 +81,12 @@
       : '<div class="person">' + inner + "</div>";
   }
 
-  function adjustBtn(mode, f) {
+  function adjustBtn(mode, f, typeId) {
     var add = mode === "add";
+    var what = typeId ? typeShort(typeId) + " credits" : "credits";
     return '<button class="btn ' + (add ? "btn--primary" : "btn--ghost") + ' btn--xs" type="button" data-cr-adjust="' + mode +
-      '" data-family="' + esc(f.id) + '" aria-label="' + (add ? "Add credits to " : "Deduct credits from ") + esc(famLabel(f)) + '">' +
+      '" data-family="' + esc(f.id) + '"' + (typeId ? ' data-type="' + esc(typeId) + '"' : "") +
+      ' aria-label="' + (add ? "Add " + esc(what) + " to " : "Deduct " + esc(what) + " from ") + esc(famLabel(f)) + '">' +
       Admin.icon(add ? "plus" : "minus") + (add ? "Add" : "Deduct") + "</button>";
   }
 
@@ -89,9 +97,10 @@
     return '<section class="cr-intro" aria-labelledby="crIntroTitle">' +
         '<span class="cr-intro__ic">' + Admin.icon("wallet") + "</span>" +
         '<div class="cr-intro__text">' +
-          '<h2 class="cr-intro__t" id="crIntroTitle">Credits are shared by the family</h2>' +
-          '<p class="cr-intro__d">Parents buy one package and any of their children can use it. A booking takes a credit from ' +
-            "the family’s pool, and a change here affects the family you pick. Parents see it — with your note — in their family credit history.</p>" +
+          '<h2 class="cr-intro__t" id="crIntroTitle">Credits are shared by the family — one wallet per credit type</h2>' +
+          '<p class="cr-intro__d">Parents buy one package and any of their children can use it — but each credit has a type ' +
+            "(Junior, Elite, Competitive or a coach’s private sessions) and only books that kind of class. Pick the family, then which credits to change. " +
+            "Parents see it — with your note — in their family credit history.</p>" +
         "</div>" +
         '<button class="btn btn--ghost btn--sm cr-intro__go" type="button" id="crStudentsLink" data-go="students">' +
           Admin.icon("users") + "See all students</button>" +
@@ -101,14 +110,22 @@
   /* ============================================================
      NEEDS A TOP-UP
      ============================================================ */
-  // Families still coming to class with LOW_AT credits or fewer (owing first).
+  // A family's wallet is low when it holds LOW_AT credits or fewer of a type it
+  // needs, and the family is still coming to class. One row per family + wallet.
   function lowRows() {
     var t = db.todayISO();
-    return db.creditReport().rows.filter(function (r) {
-      if (!r.children.length || r.available > LOW_AT) return false;
-      return r.upcoming > 0 || (!!r.lastClass && db.daysBetween(r.lastClass, t) <= LOW_ACTIVE_DAYS);
-    }).sort(function (a, b) {
-      return a.available - b.available || b.upcoming - a.upcoming || a.family.parentName.localeCompare(b.family.parentName);
+    var out = [];
+    db.creditReport().rows.forEach(function (r) {
+      if (!r.children.length) return;
+      if (!(r.upcoming > 0 || (!!r.lastClass && db.daysBetween(r.lastClass, t) <= LOW_ACTIVE_DAYS))) return;
+      db.balances(r.family.id).forEach(function (w) {
+        if (w.credits > LOW_AT) return;
+        out.push({ row: r, family: r.family, children: r.children, type: w.type, credits: w.credits });
+      });
+    });
+    return out.sort(function (a, b) {
+      return a.credits - b.credits || b.row.upcoming - a.row.upcoming ||
+        a.family.parentName.localeCompare(b.family.parentName) || a.type.name.localeCompare(b.type.name);
     });
   }
 
@@ -116,23 +133,27 @@
     var list = lowRows();
     if (!list.length) return "";
     var shown = list.slice(0, LOW_LIMIT);
-    var items = shown.map(function (r) {
-      var f = r.family;
+    var items = shown.map(function (w) {
+      var f = w.family;
       var meta = [
-        r.available < 0 ? "Owes " + credits(-r.available) : r.available === 0 ? "No credits left" : credits(r.available) + " left",
-        r.upcoming ? Admin.plural(r.upcoming, "class", "classes") + " booked" : "Last class " + fmt.date(r.lastClass)
+        w.credits < 0 ? "Owes " + walletWords(w.type.id, -w.credits)
+          : w.credits === 0 ? "No " + typeShort(w.type.id) + " credits left"
+          : walletWords(w.type.id, w.credits) + " left",
+        w.row.upcoming ? Admin.plural(w.row.upcoming, "class", "classes") + " booked"
+          : "Last class " + fmt.date(w.row.lastClass)
       ].join(" · ");
-      return '<li class="cr-low__item' + (r.available <= 0 ? " is-out" : "") + '" data-cr-low="' + esc(f.id) + '">' +
-          '<div class="cr-low__who">' + familyPerson(f, r.children) + "</div>" +
-          '<div class="cr-low__bal"><span class="sr-only">Family credits: </span>' + h.credits(r.available) +
+      return '<li class="cr-low__item' + (w.credits <= 0 ? " is-out" : "") + '" data-cr-low="' + esc(f.id) +
+          '" data-cr-low-type="' + esc(w.type.id) + '">' +
+          '<div class="cr-low__who">' + familyPerson(f, w.children) + "</div>" +
+          '<div class="cr-low__bal">' + h.creditChip(w.type.id, w.credits) +
             '<span class="cr-low__meta">' + esc(meta) + "</span></div>" +
-          '<div class="btn-row cr-low__actions">' + adjustBtn("deduct", f) + adjustBtn("add", f) + "</div>" +
+          '<div class="btn-row cr-low__actions">' + adjustBtn("deduct", f, w.type.id) + adjustBtn("add", f, w.type.id) + "</div>" +
         "</li>";
     }).join("");
     return '<section class="card cr-low" aria-labelledby="crLowTitle">' +
         '<div class="card__head">' +
           '<div><h2 class="card__title" id="crLowTitle">Needs a top-up</h2>' +
-          '<p class="card__sub">Families still coming to class with ' + credits(LOW_AT) + " or fewer left" +
+          '<p class="card__sub">Families still coming to class with ' + credits(LOW_AT) + " or fewer of a credit they need" +
             (list.length > shown.length ? " · showing " + shown.length + " of " + list.length : "") + "</p></div>" +
           (list.length > shown.length
             ? '<button class="btn btn--quiet btn--sm" type="button" data-go="students">See all in Students</button>' : "") +
@@ -146,6 +167,9 @@
      ============================================================ */
   function logCard() {
     var all = db.ledger({ type: "manual" });
+    var typeIds = [];
+    all.forEach(function (l) { if (typeIds.indexOf(l.creditType) < 0) typeIds.push(l.creditType); });
+    if (ui.creditType !== "all" && !db.creditType(ui.creditType)) ui.creditType = "all";
     var months = [];
     all.forEach(function (l) {
       var m = l.at.slice(0, 7);
@@ -153,7 +177,10 @@
     });
     months.sort().reverse();
     if (ui.month !== "all" && months.indexOf(ui.month) < 0) ui.month = "all";
-    var list = ui.month === "all" ? all : all.filter(function (l) { return l.at.slice(0, 7) === ui.month; });
+    var list = all.filter(function (l) {
+      return (ui.month === "all" || l.at.slice(0, 7) === ui.month) &&
+        (ui.creditType === "all" || l.creditType === ui.creditType);
+    });
 
     var added = 0, deducted = 0, paid = 0, fams = {};
     list.forEach(function (l) {
@@ -163,6 +190,7 @@
     });
     var summary = list.length
       ? Admin.plural(list.length, "change") + " for " + Admin.plural(Object.keys(fams).length, "family", "families") +
+        (ui.creditType === "all" ? "" : " · " + db.creditTypeName(ui.creditType)) +
         " · +" + added + " added · −" + deducted + " deducted" +
         (paid ? " · " + fmt.money(paid) + " received" : "")
       : "No manual changes";
@@ -173,13 +201,14 @@
 
     var body;
     if (!list.length) {
-      body = h.empty("wallet", ui.month === "all" ? "No manual changes yet" : "No manual changes this month",
+      body = h.empty("wallet", ui.month === "all" && ui.creditType === "all" ? "No manual changes yet" : "No manual changes to show",
         "Deductions and additions made here are listed with the family, who made them and why.",
         '<button class="btn btn--primary btn--sm" type="button" data-cr-adjust="deduct">' + Admin.icon("wallet") + "Adjust credits</button>");
     } else {
       body = '<div class="tbl-wrap cr-logwrap"><table class="tbl cr-log">' +
         '<caption class="sr-only">Manual credit adjustments per family, newest first</caption>' +
         '<thead><tr><th scope="col">When</th><th scope="col">Family</th><th scope="col" class="num">Change</th>' +
+        '<th scope="col">Credits</th>' +
         '<th scope="col">Reason</th><th scope="col">Note to parent</th><th scope="col">By</th><th scope="col" class="num">Amount</th></tr></thead><tbody>' +
         list.map(function (l) {
           var f = db.family(l.familyId);
@@ -197,6 +226,7 @@
               '<td class="cr-who" data-label="Family">' + who + "</td>" +
               '<td class="num" data-label="Change"><span class="cr-delta cr-delta--' + (plus ? "plus" : "minus") + '">' +
                 esc(fmt.signed(l.delta)) + '</span><span class="sr-only"> ' + (plus ? "added" : "deducted") + "</span></td>" +
+              '<td class="cr-type" data-label="Credits">' + h.creditChip(l.creditType) + "</td>" +
               '<td data-label="Reason">' + esc(l.reason) + "</td>" +
               '<td class="cr-note" data-label="Note to parent">' + (l.note ? esc(l.note) : '<span class="muted">—</span>') + "</td>" +
               '<td class="nowrap" data-label="By">' + esc(db.actorName(l.by)) + "</td>" +
@@ -210,7 +240,9 @@
         '<div class="card__head">' +
           '<div><h2 class="card__title" id="crLogTitle">Manual adjustment log</h2>' +
           '<p class="card__sub" id="crLogSummary">' + esc(summary) + "</p></div>" +
-          '<div class="cr-month">' +
+          '<div class="cr-filters">' +
+            '<label class="sr-only" for="crType">Show credit type</label>' +
+            '<select class="input" id="crType">' + h.creditTypeOptions(ui.creditType, { all: true, allLabel: "All credit types" }) + "</select>" +
             '<label class="sr-only" for="crMonth">Show month</label>' +
             '<select class="input" id="crMonth">' + h.options(opts, ui.month) + "</select>" +
           "</div>" +
@@ -260,11 +292,16 @@
       Admin.refresh();
     });
 
+    root.querySelector("#crType").addEventListener("change", function (e) {
+      ui.creditType = e.target.value;
+      Admin.refresh();
+    });
+
     root.addEventListener("click", function (e) {
       var t = e.target;
       if (t.closest("#crAdjustBtn")) { Admin.adjustCreditsModal(); return; }
       var adj = t.closest("[data-cr-adjust]");
-      if (adj) Admin.adjustCreditsModal(adj.getAttribute("data-family"), adj.getAttribute("data-cr-adjust"));
+      if (adj) Admin.adjustCreditsModal(adj.getAttribute("data-family"), adj.getAttribute("data-cr-adjust"), adj.getAttribute("data-type") || null);
     });
   }
 

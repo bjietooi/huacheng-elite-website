@@ -1,0 +1,8 @@
+{
+  "name": "huacheng-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Headless tests for the Huacheng Elite booking mock",
+  "scripts": { "test": "./run.sh" },
+  "dependencies": { "jsdom": "^24.1.3" }
+}

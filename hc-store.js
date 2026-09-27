@@ -24,14 +24,17 @@
                       coaches). A coach's `coach` tag is the name the
                       timetable uses; renaming rewrites every reference.
    - templateCoach    weekly class handed to another coach from a date
-   - leaves[]         coach off for a whole day → that coach's
-                      classes on the day are blocked (a class that
+   - leaves[]         coach off for a whole day, or a time range on a
+                      day → their classes that overlap it are blocked (a class that
                       had already started when the leave was booked
                       is left as it ran)
    - bookings[]       one child in one occurrence
-   - ledger[]         every credit movement. Credits belong to the FAMILY:
-                      one pool any child can use (booking / refund rows
-                      also note which child). balance(familyId) = sum(delta)
+   - creditTypes[]    what a credit can book (Junior / Elite / Competitive
+                      classes, or Private with one coach)
+   - packages[]       what parents can buy — admin-managed price points
+   - ledger[]         every credit movement. Credits belong to the FAMILY
+                      and to a credit TYPE: one wallet per type, any child
+                      can use it. balance(familyId, typeId) = sum(delta)
    ============================================================ */
 (function () {
   "use strict";
@@ -43,7 +46,7 @@
   }
 
   var KEY = "hc_db";
-  var VERSION = 3; // 3: one shared credit pool per family (client decision, 19 Sep)
+  var VERSION = 4; // 4: credits are typed (Junior / Elite / Competitive / Private per coach)
   var SESSION_KEYS = { parent: "hc_parent", staff: "hc_staff" };
 
   var DB = null;
@@ -154,6 +157,21 @@
 
   var LEVELS = ["Junior", "Elite", "Competitive"];
 
+  // Private 1-to-1 lives only in the console (not on the public site's
+  // programme list), so it's defined here and merged into lookups.
+  var PRIVATE_PROGRAMME = {
+    id: "private", name: "Private 1-to-1", level: "Private",
+    age: "Any age", credits: 1, duration: 60, tier: "private", maxSize: 1,
+    blurb: "One-to-one coaching, booked with a specific coach."
+  };
+
+  function programmeById(id) {
+    return HC.getProgramme(id) || (id === PRIVATE_PROGRAMME.id ? PRIVATE_PROGRAMME : null);
+  }
+  function allProgrammes() { return HC.programmes.concat([PRIVATE_PROGRAMME]); }
+  function slug(text) { return String(text).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
+  function privateTypeId(coach) { return "private-" + slug(coach); }
+
   function staffList() { load(); return DB.staff || []; }
   function staffById(id) {
     return staffList().find(function (s) { return s.id === id; }) || null;
@@ -251,7 +269,7 @@
   function idx() {
     load();
     if (cache.rev === rev) return cache;
-    var c = { rev: rev, family: {}, child: {}, booking: {}, byOcc: {}, byChild: {}, byFamily: {}, balance: {}, leave: {} };
+    var c = { rev: rev, family: {}, child: {}, booking: {}, byOcc: {}, byChild: {}, byFamily: {}, balance: {}, wallet: {}, leave: {} };
     DB.families.forEach(function (f) { c.family[f.id] = f; c.balance[f.id] = 0; });
     DB.children.forEach(function (ch) { c.child[ch.id] = ch; });
     DB.bookings.forEach(function (b) {
@@ -260,8 +278,15 @@
       (c.byChild[b.childId] = c.byChild[b.childId] || []).push(b);
       (c.byFamily[b.familyId] = c.byFamily[b.familyId] || []).push(b);
     });
-    DB.ledger.forEach(function (l) { c.balance[l.familyId] = (c.balance[l.familyId] || 0) + l.delta; });
-    DB.leaves.forEach(function (l) { c.leave[l.coach + "|" + l.date] = l; });
+    DB.ledger.forEach(function (l) {
+      c.balance[l.familyId] = (c.balance[l.familyId] || 0) + l.delta;
+      var k = l.familyId + "|" + (l.creditType || "junior");
+      c.wallet[k] = (c.wallet[k] || 0) + l.delta;
+    });
+    DB.leaves.forEach(function (l) {
+      var k = l.coach + "|" + l.date;
+      (c.leave[k] = c.leave[k] || []).push(l);
+    });
     cache = c;
     return c;
   }
@@ -305,7 +330,7 @@
     }
     var t = template(k.id);
     if (!t || !k.date || dayIndex(k.date) !== t.day) return null;
-    var prog = HC.getProgramme(t.programmeId) || {};
+    var prog = programmeById(t.programmeId) || {};
     return {
       key: key, date: k.date, templateId: t.id, oneOffId: null, time: t.time,
       programmeId: t.programmeId, coach: templateCoachOn(t, k.date), capacity: t.capacity,
@@ -328,7 +353,7 @@
   function buildOcc(base) {
     var c = idx();
     var ov = DB.overrides[base.key] || {};
-    var prog = HC.getProgramme(base.programmeId) ||
+    var prog = programmeById(base.programmeId) ||
       { id: base.programmeId, name: base.programmeId, level: "", credits: 1, tier: "junior" };
     var coach = ov.coach || base.coach;
     var t = todayISO(), nowM = nowMinutes();
@@ -347,6 +372,7 @@
       level: prog.level,
       tier: prog.tier,
       cost: prog.credits || 1,
+      creditType: null,      // filled in below (needs DB lookups)
       coach: coach,
       originalCoach: base.coach,
       substituted: !!ov.coach && ov.coach !== base.coach,
@@ -379,13 +405,17 @@
       occ.status = "blocked"; occ.blockKind = "manual";
       occ.reason = ov.reason || ""; occ.statusBy = ov.by; occ.statusAt = ov.at;
     } else {
-      var lv = c.leave[coach + "|" + base.date];
-      // leave booked once a class had begun doesn't touch it — it ran as normal
-      if (lv && !(lv.at >= base.date + "T" + base.time)) {
+      var lv = coverFor(c.leave[coach + "|" + base.date], base.time, base.duration, base.date);
+      if (lv) {
         occ.status = "blocked"; occ.blockKind = "leave"; occ.leaveId = lv.id;
-        occ.reason = lv.reason || "Coach on leave"; occ.statusBy = lv.by; occ.statusAt = lv.at;
+        occ.leaveWindow = lv.allDay ? null : { from: lv.from, to: lv.to };
+        occ.reason = lv.reason || (lv.allDay ? "Coach on leave" : "Coach away " + HC.formatTime(lv.from) + " – " + HC.formatTime(lv.to));
+        occ.statusBy = lv.by; occ.statusAt = lv.at;
       }
     }
+
+    occ.creditType = creditTypeFor(occ);
+    occ.creditTypeName = creditTypeShort(occ.creditType);
 
     var active = (c.byOcc[base.key] || []).filter(function (b) { return b.status === "booked"; });
     occ.booked = active.length;
@@ -397,6 +427,18 @@
     occ.bookable = occ.status === "open" && !occ.started && occ.spotsLeft > 0;
     occ.unmarked = occ.started ? active.filter(function (b) { return !b.attendance; }).length : 0;
     return occ;
+  }
+
+  // The leave entry that closes a class: all day, or a time range the class
+  // overlaps. Leave booked once a class had begun doesn't touch it.
+  function coverFor(list, time, duration, date) {
+    if (!list || !list.length) return null;
+    var s = toMinutes(time), e = s + (+duration || 60);
+    return list.find(function (l) {
+      if (l.at >= date + "T" + time) return false;
+      if (l.allDay) return true;
+      return s < toMinutes(l.to) && toMinutes(l.from) < e;
+    }) || null;
   }
 
   function occurrence(key) {
@@ -609,7 +651,7 @@
   function addOneOff(data, opts) {
     opts = opts || {};
     load();
-    var prog = HC.getProgramme(data.programmeId);
+    var prog = programmeById(data.programmeId);
     if (!prog) return fail("Choose a programme.");
     if (!data.date) return fail("Choose a date.");
     if (!/^\d{2}:\d{2}$/.test(data.time || "")) return fail("Choose a start time.");
@@ -690,7 +732,7 @@
       rev++;
       return fail(skipped.length ? skipped[0].error : "No sessions were added.", { skipped: skipped });
     }
-    var prog = HC.getProgramme(data.programmeId) || {};
+    var prog = programmeById(data.programmeId) || {};
     var first = splitKey(keys[0]).date, last = splitKey(keys[keys.length - 1]).date;
     audit(opts.by, "one-off", "Added " + name + " — " + keys.length + " session" + (keys.length === 1 ? "" : "s") + " of " +
       (prog.name || "class") + " at " + HC.formatTime(data.time) + " (" + data.coach + "), " +
@@ -739,42 +781,83 @@
     }).sort(function (a, b) { return a.date.localeCompare(b.date) || a.coach.localeCompare(b.coach); });
   }
 
-  function leaveFor(coach, date) {
-    return idx().leave[coach + "|" + date] || null;
+  // Every leave entry a coach has on a date (all-day or time ranges).
+  function leavesOn(coach, date) {
+    return (idx().leave[coach + "|" + date] || []).slice().sort(function (a, b) {
+      return (a.allDay ? "" : a.from).localeCompare(b.allDay ? "" : b.from);
+    });
+  }
+
+  // The leave covering a class (pass its time), or the first leave that day.
+  function leaveFor(coach, date, time, duration) {
+    var list = leavesOn(coach, date);
+    if (!list.length) return null;
+    if (!time) return list[0];
+    return coverFor(list, time, duration || 60, date);
+  }
+
+  function leaveLabel(l) {
+    if (!l) return "";
+    return l.allDay ? "All day" : HC.formatTime(l.from) + " – " + HC.formatTime(l.to);
   }
 
   // Classes new leave would close: open ones that haven't started yet. A class
   // already under way (or finished) keeps its bookings and attendance.
-  function leaveTargets(coach, date) {
-    return occurrencesForDate(date, { coach: coach }).filter(function (o) { return o.status === "open" && !o.started; });
+  // window: { from, to } for part of a day, or null/omitted for all day
+  function leaveTargets(coach, date, window) {
+    var s = window && window.from ? toMinutes(window.from) : null;
+    var e = window && window.to ? toMinutes(window.to) : null;
+    return occurrencesForDate(date, { coach: coach }).filter(function (o) {
+      if (o.status !== "open" || o.started) return false;
+      if (s === null) return true;
+      return toMinutes(o.time) < e && s < toMinutes(o.time) + o.duration;
+    });
   }
 
   // What adding leave would affect — for the confirmation step.
-  function leaveImpact(coach, date) {
-    var list = leaveTargets(coach, date);
+  function leaveImpact(coach, date, window) {
+    var list = leaveTargets(coach, date, window);
     return {
       classes: list,
       bookings: list.reduce(function (n, o) { return n + o.booked; }, 0)
     };
   }
 
+  // data: { coach, date, reason, from, to } — from/to (HH:MM) for part of a
+  // day; leave them out for the whole day.
   function addLeave(data, opts) {
     opts = opts || {};
     load();
     if (!data.coach) return fail("Choose a coach.");
     if (!data.date) return fail("Choose a date.");
     if (!opts.allowPast && data.date < todayISO()) return fail("That date has already passed.");
-    if (leaveFor(data.coach, data.date)) return fail(data.coach + " is already on leave on " + formatDate(data.date) + ".");
+    var allDay = !data.from || !data.to;
+    var from = allDay ? null : data.from, to = allDay ? null : data.to;
+    if (!allDay) {
+      if (!/^\d{2}:\d{2}$/.test(from) || !/^\d{2}:\d{2}$/.test(to)) return fail("Enter a start and end time.");
+      if (toMinutes(to) <= toMinutes(from)) return fail("The end time must be after the start time.");
+    }
+    var window = allDay ? null : { from: from, to: to };
+    var clash = leavesOn(data.coach, data.date).find(function (l) {
+      if (l.allDay || allDay) return true;
+      return toMinutes(from) < toMinutes(l.to) && toMinutes(l.from) < toMinutes(to);
+    });
+    if (clash) {
+      return fail(data.coach + " already has leave on " + formatDate(data.date) +
+        " (" + leaveLabel(clash).toLowerCase() + ").");
+    }
     var at = opts.at || nowStamp();
-    var affected = leaveTargets(data.coach, data.date);
-    var lv = { id: nextId("L"), coach: data.coach, date: data.date, reason: (data.reason || "").trim(), by: opts.by, at: at };
+    var affected = leaveTargets(data.coach, data.date, window);
+    var lv = { id: nextId("L"), coach: data.coach, date: data.date, allDay: allDay, from: from, to: to,
+      reason: (data.reason || "").trim(), by: opts.by, at: at };
     DB.leaves.push(lv);
     rev++;
     var refunded = 0;
     affected.forEach(function (o) {
       refunded += cancelActiveBookings(o.key, opts.by, "Coach unavailable", at);
     });
-    audit(opts.by, "leave", data.coach + " on leave " + formatDate(data.date) + " — " + affected.length + " class" +
+    audit(opts.by, "leave", data.coach + " on leave " + formatDate(data.date) +
+      (allDay ? "" : " (" + leaveLabel(lv) + ")") + " — " + affected.length + " class" +
       (affected.length === 1 ? "" : "es") + " blocked" + (refunded ? ", " + refunded + " booking" + (refunded === 1 ? "" : "s") + " refunded" : ""), at);
     done(opts, { type: "leave" });
     return { ok: true, leave: lv, classes: affected.length, refunded: refunded };
@@ -787,7 +870,8 @@
     if (i < 0) return fail("Leave not found.");
     var lv = DB.leaves[i];
     DB.leaves.splice(i, 1);
-    audit(opts.by, "leave-cancel", lv.coach + " back on " + formatDate(lv.date) + " — classes reopened");
+    audit(opts.by, "leave-cancel", lv.coach + " back on " + formatDate(lv.date) +
+      (lv.allDay ? "" : " (" + leaveLabel(lv) + ")") + " — classes reopened");
     commit({ type: "leave" });
     return { ok: true };
   }
@@ -867,6 +951,7 @@
       login: !!data.login, active: true, createdAt: opts.at || nowStamp()
     };
     DB.staff.push(c);
+    syncPrivateTypes(); // every coach gets a "Private (name)" credit type
     audit(opts.by, "coach", "Added coach " + c.name + (c.login ? " (can log in)" : ""), c.createdAt);
     done(opts, { type: "coach", staffId: c.id });
     return { ok: true, coach: c };
@@ -935,6 +1020,7 @@
     }
     if (changes.length) {
       rev++;
+      syncPrivateTypes();
       audit(opts.by, "coach", oldName + ": " + changes.join(", "));
     }
     done(opts, { type: "coach", staffId: id });
@@ -970,7 +1056,7 @@
     var list = DB.templateCoach[t.id] = (DB.templateCoach[t.id] || []).filter(function (x) { return x.from < from; });
     list.push({ from: from, coach: coach, by: opts.by, at: opts.at || nowStamp() });
     rev++;
-    var prog = HC.getProgramme(t.programmeId) || {};
+    var prog = programmeById(t.programmeId) || {};
     // bookings stay; any class this coach can't take that day is caught by leave rules
     var refunded = 0;
     DB.leaves.filter(function (l) { return l.coach === coach && l.date >= from; }).forEach(function (l) {
@@ -993,10 +1079,168 @@
       var ends = DB.seriesEnds[t.id];
       return templateCoachOn(t, date) === coach && !(ends && ends.from <= date);
     }).map(function (t) {
-      var prog = HC.getProgramme(t.programmeId) || {};
+      var prog = programmeById(t.programmeId) || {};
       return { templateId: t.id, day: t.day, time: t.time, programmeId: t.programmeId, name: prog.name || t.programmeId,
         level: prog.level, capacity: t.capacity, duration: prog.duration || 60 };
     }).sort(function (a, b) { return a.day - b.day || a.time.localeCompare(b.time); });
+  }
+
+  /* ============================================================
+     CREDIT TYPES & PACKAGES
+     A credit type says what a credit can book: a class level, or private
+     1-to-1 with one coach. Packages (what parents buy) are admin-managed
+     price points that grant credits of one type.
+     ============================================================ */
+  function creditTypes(opts) {
+    load();
+    opts = opts || {};
+    return DB.creditTypes.filter(function (t) {
+      return opts.includeInactive || t.active !== false;
+    }).sort(function (a, b) { return (a.order || 99) - (b.order || 99) || a.name.localeCompare(b.name); });
+  }
+
+  function creditType(id) {
+    load();
+    return DB.creditTypes.find(function (t) { return t.id === id; }) || null;
+  }
+
+  function creditTypeName(id) {
+    var t = creditType(id);
+    return t ? t.name : "Credits";
+  }
+
+  function creditTypeShort(id) {
+    var t = creditType(id);
+    return t ? (t.short || t.name) : "Credits";
+  }
+
+  // Which credits a class needs: private → that coach's own type.
+  function creditTypeFor(occOrData) {
+    if (!occOrData) return "junior";
+    var progId = occOrData.programmeId || (occOrData.programme && occOrData.programme.id);
+    var prog = programmeById(progId) || {};
+    if (prog.tier === "private") return privateTypeId(occOrData.coach || "");
+    var byProgramme = DB.creditTypes.find(function (t) {
+      return t.active !== false && (t.programmes || []).indexOf(prog.id) >= 0;
+    });
+    return byProgramme ? byProgramme.id : (prog.tier || "junior");
+  }
+
+  // One private credit type per coach, kept in step with the coach list.
+  function syncPrivateTypes() {
+    var order = 10;
+    (DB.staff || []).forEach(function (st) {
+      if (st.role !== "coach") return;
+      var id = privateTypeId(st.coach);
+      var t = creditType(id);
+      order++;
+      if (!t) {
+        DB.creditTypes.push({
+          id: id, name: "Private (" + st.coach + ")", short: "Private · " + st.coach,
+          kind: "private", coach: st.coach, programmes: [PRIVATE_PROGRAMME.id],
+          active: st.active !== false, order: order
+        });
+        rev++;
+      } else if (t.coach !== st.coach || t.active !== (st.active !== false)) {
+        t.coach = st.coach;
+        t.name = "Private (" + st.coach + ")";
+        t.short = "Private · " + st.coach;
+        t.active = st.active !== false;
+        rev++;
+      }
+    });
+  }
+
+  function packages(opts) {
+    load();
+    opts = opts || {};
+    return DB.packages.filter(function (p) {
+      if (!opts.includeInactive && p.active === false) return false;
+      if (opts.creditType && p.creditType !== opts.creditType) return false;
+      return true;
+    }).sort(function (a, b) {
+      var ta = creditType(a.creditType) || {}, tb = creditType(b.creditType) || {};
+      return (ta.order || 99) - (tb.order || 99) || a.credits - b.credits;
+    });
+  }
+
+  function packageById(id) {
+    load();
+    return DB.packages.find(function (p) { return p.id === id; }) || null;
+  }
+
+  function validPackage(data, selfId) {
+    if (!String(data.name || "").trim()) return "Give the package a name.";
+    if (!creditType(data.creditType)) return "Choose which credits this package gives.";
+    var credits = Math.floor(+data.credits);
+    if (!(credits > 0) || credits > 200) return "Credits must be between 1 and 200.";
+    var price = +data.price;
+    if (!(price >= 0) || price > 100000) return "Enter a price (0 or more).";
+    var clash = DB.packages.find(function (p) {
+      return p.id !== selfId && p.active !== false && p.creditType === data.creditType &&
+        p.credits === credits && Math.abs((p.price || 0) - price) < 0.001;
+    });
+    if (clash) return "There's already a package like that (" + clash.name + ").";
+    return null;
+  }
+
+  // data: { name, creditType, credits, price, tag, note, active }
+  function addPackage(data, opts) {
+    opts = opts || {};
+    load();
+    var err = validPackage(data, null);
+    if (err) return fail(err);
+    var p = {
+      id: nextId("P"),
+      name: String(data.name).trim(),
+      creditType: data.creditType,
+      credits: Math.floor(+data.credits),
+      price: Math.round(+data.price * 100) / 100,
+      tag: String(data.tag || "").trim(),
+      note: String(data.note || "").trim(),
+      trial: !!data.trial,
+      active: data.active !== false,
+      order: +data.order || (DB.packages.length + 1),
+      createdAt: opts.at || nowStamp()
+    };
+    DB.packages.push(p);
+    audit(opts.by, "package", "Added package " + p.name + " — " + p.credits + " × " +
+      creditTypeShort(p.creditType) + " at " + money(p.price), p.createdAt);
+    done(opts, { type: "package", packageId: p.id });
+    return { ok: true, package: p };
+  }
+
+  function updatePackage(id, patch, opts) {
+    opts = opts || {};
+    load();
+    var p = packageById(id);
+    if (!p) return fail("Package not found.");
+    var next = Object.assign({}, p, patch);
+    var err = validPackage(next, id);
+    if (err) return fail(err);
+    var changes = [];
+    ["name", "creditType", "tag", "note"].forEach(function (k) {
+      if (patch[k] != null && String(patch[k]).trim() !== p[k]) { p[k] = String(patch[k]).trim(); changes.push(k); }
+    });
+    if (patch.credits != null && Math.floor(+patch.credits) !== p.credits) { p.credits = Math.floor(+patch.credits); changes.push("credits"); }
+    if (patch.price != null && Math.round(+patch.price * 100) / 100 !== p.price) { p.price = Math.round(+patch.price * 100) / 100; changes.push("price"); }
+    if (patch.active != null && !!patch.active !== (p.active !== false)) { p.active = !!patch.active; changes.push(p.active ? "back on sale" : "taken off sale"); }
+    if (changes.length) {
+      rev++;
+      audit(opts.by, "package", p.name + ": " + changes.join(", ") + " (" + p.credits + " × " +
+        creditTypeShort(p.creditType) + ", " + money(p.price) + ")");
+    }
+    done(opts, { type: "package", packageId: id });
+    return { ok: true, package: p };
+  }
+
+  // Packages are never deleted outright — past purchases still point at them.
+  function retirePackage(id, opts) {
+    return updatePackage(id, { active: false }, opts);
+  }
+
+  function money(n) {
+    return "S$" + Number(n || 0).toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   }
 
   /* ============================================================
@@ -1145,7 +1389,42 @@
   /* ============================================================
      CREDITS
      ============================================================ */
-  function balance(familyId) { return idx().balance[familyId] || 0; }
+  // balance(familyId) → every credit the family holds;
+  // balance(familyId, typeId) → just that wallet.
+  function balance(familyId, typeId) {
+    var c = idx();
+    if (typeId) return c.wallet[familyId + "|" + typeId] || 0;
+    return c.balance[familyId] || 0;
+  }
+
+  // [{ type, credits }] — wallets the family holds, plus the types its
+  // children's classes need (so "0 left" is visible), in type order.
+  function balances(familyId, opts) {
+    opts = opts || {};
+    var c = idx();
+    var out = {}, order = {};
+    creditTypes().forEach(function (t) { order[t.id] = t; });
+    Object.keys(c.wallet).forEach(function (k) {
+      var parts = k.split("|");
+      if (parts[0] !== familyId) return;
+      if (!c.wallet[k] && !opts.includeEmpty) return;
+      out[parts[1]] = c.wallet[k];
+    });
+    if (opts.includeNeeded !== false) {
+      children(familyId).forEach(function (ch) {
+        (ch.programmes || []).forEach(function (pid) {
+          var id = creditTypeFor({ programmeId: pid });
+          if (!(id in out)) out[id] = c.wallet[familyId + "|" + id] || 0;
+        });
+      });
+    }
+    return Object.keys(out).map(function (id) {
+      return { type: creditType(id) || { id: id, name: creditTypeName(id), short: creditTypeShort(id) }, credits: out[id] };
+    }).sort(function (a, b) {
+      return ((order[a.type.id] || {}).order || 99) - ((order[b.type.id] || {}).order || 99) ||
+        a.type.name.localeCompare(b.type.name);
+    });
+  }
 
   // "Jane Tan's family" — how credit messages name the shared pool
   function familyLabel(f) { return f ? f.parentName + "'s family" : "the family"; }
@@ -1157,6 +1436,7 @@
     return DB.ledger.filter(function (l) {
       if (filter.familyId && l.familyId !== filter.familyId) return false;
       if (filter.childId && l.childId !== filter.childId) return false;
+      if (filter.creditType && (l.creditType || "junior") !== filter.creditType) return false;
       if (filter.type && l.type !== filter.type) return false;
       if (filter.from && l.at.slice(0, 10) < filter.from) return false;
       if (filter.to && l.at.slice(0, 10) > filter.to) return false;
@@ -1164,16 +1444,19 @@
     }).sort(function (a, b) { return b.at.localeCompare(a.at) || idNum(b.id) - idNum(a.id); });
   }
 
-  // A family's history, newest first, with the pool's balance after each row.
-  function ledgerWithBalance(familyId) {
-    var run = 0;
-    return ledger({ familyId: familyId }).reverse().map(function (l) {
-      run += l.delta;
-      return Object.assign({}, l, { balanceAfter: run });
+  // A family's history, newest first. balanceAfter is that credit type's
+  // wallet after the row; totalAfter is everything the family held.
+  function ledgerWithBalance(familyId, filter) {
+    var run = {}, total = 0;
+    return ledger(Object.assign({ familyId: familyId }, filter || {})).reverse().map(function (l) {
+      var t = l.creditType || "junior";
+      run[t] = (run[t] || 0) + l.delta;
+      total += l.delta;
+      return Object.assign({}, l, { balanceAfter: run[t], totalAfter: total });
     }).reverse();
   }
 
-  // delta < 0 deducts. opts: { reason, note, amount, by, allowNegative }
+  // delta < 0 deducts. opts: { creditType, reason, note, amount, by, allowNegative }
   function adjustCredits(familyId, delta, opts) {
     opts = opts || {};
     load();
@@ -1182,21 +1465,31 @@
     delta = Math.trunc(+delta);
     if (!delta) return fail("Enter a number of credits.");
     if (!opts.reason) return fail("Choose a reason.");
-    var bal = balance(familyId);
+    var typeId = opts.creditType;
+    if (!typeId) {
+      // no type given: only safe when the family holds exactly one kind
+      var held = balances(familyId, { includeNeeded: false });
+      if (held.length === 1) typeId = held[0].type.id;
+      else return fail("Choose which credits to change.", { code: "creditType" });
+    }
+    if (!creditType(typeId)) return fail("Choose which credits to change.", { code: "creditType" });
+    var bal = balance(familyId, typeId);
     if (delta < 0 && bal + delta < 0 && !opts.allowNegative) {
-      return fail(familyLabel(f) + " only has " + bal + " credit" + (bal === 1 ? "" : "s") + ".", { code: "insufficient", balance: bal });
+      return fail(familyLabel(f) + " only has " + bal + " " + creditTypeShort(typeId) + " credit" +
+        (bal === 1 ? "" : "s") + ".", { code: "insufficient", balance: bal });
     }
     var entry = {
-      id: nextId("T"), familyId: familyId, childId: null, delta: delta, type: "manual",
+      id: nextId("T"), familyId: familyId, childId: null, creditType: typeId, delta: delta, type: "manual",
       reason: opts.reason, note: (opts.note || "").trim(),
       amount: delta > 0 && +opts.amount > 0 ? +opts.amount : 0,
       by: opts.by, at: opts.at || nowStamp()
     };
     DB.ledger.push(entry);
-    audit(opts.by, "credits", (delta < 0 ? "Deducted " + (-delta) : "Added " + delta) + " credit" +
-      (Math.abs(delta) === 1 ? "" : "s") + (delta < 0 ? " from " : " to ") + familyLabel(f) + " — " + opts.reason, entry.at);
-    done(opts, { type: "credits", familyId: familyId });
-    return { ok: true, entry: entry, balance: bal + delta };
+    audit(opts.by, "credits", (delta < 0 ? "Deducted " + (-delta) : "Added " + delta) + " " +
+      creditTypeShort(typeId) + " credit" + (Math.abs(delta) === 1 ? "" : "s") +
+      (delta < 0 ? " from " : " to ") + familyLabel(f) + " — " + opts.reason, entry.at);
+    done(opts, { type: "credits", familyId: familyId, creditType: typeId });
+    return { ok: true, entry: entry, balance: bal + delta, creditType: typeId };
   }
 
   function hasClaimedTrial(familyId) {
@@ -1214,80 +1507,67 @@
     });
   }
 
-  // The pricing levels a family's children train at (for suggesting packages).
-  function familyTiers(familyId) {
-    var tiers = [];
-    DB.children.forEach(function (ch) {
-      if (ch.familyId !== familyId || ch.active === false) return;
-      var t = tierOf(ch.level);
-      if (tiers.indexOf(t) < 0) tiers.push(t);
+  // The credit types a family's children need for their usual classes.
+  function familyTypes(familyId) {
+    var out = [];
+    children(familyId).forEach(function (ch) {
+      (ch.programmes || []).forEach(function (pid) {
+        var id = creditTypeFor({ programmeId: pid });
+        if (out.indexOf(id) < 0) out.push(id);
+      });
+      var lvl = tierOf(ch.level);
+      var byLevel = creditTypes().find(function (t) { return t.id === lvl; });
+      if (byLevel && out.indexOf(byLevel.id) < 0) out.push(byLevel.id);
     });
-    return tiers.length ? tiers : ["junior"];
+    return out.length ? out : ["junior"];
   }
 
-  function topTier(familyId) {
-    var order = ["junior", "elite", "competitive"];
-    return familyTiers(familyId).sort(function (a, b) { return order.indexOf(b) - order.indexOf(a); })[0];
-  }
-
-  // Packages a parent can buy — credits go into the family's shared pool.
-  // The free trial comes first, then every level's packs; `suggested` marks
-  // the levels this family's children train at.
-  // [{ id, name, credits, price, tier, tierLabel, tag, note, suggested, eligible?, claimed? }]
+  // What a parent can buy, newest price points first within each credit type.
+  // `suggested` marks the types this family's children actually train at, and
+  // the free trial is only offered to a brand-new family.
+  // → [{ ...package, type, suggested, eligible?, claimed? }]
   function packagesFor(familyId) {
     if (!family(familyId)) return [];
-    var mine = familyTiers(familyId);
-    var list = [{
-      id: "trial", name: "Free Trial", credits: 1, price: 0, tier: null, tierLabel: "", tag: "New students",
-      note: "One complimentary class for a new family", eligible: trialEligible(familyId),
-      claimed: hasClaimedTrial(familyId), suggested: true
-    }];
-    ["junior", "elite", "competitive"].forEach(function (tier) {
-      var packs = TIER_PACKS[tier];
-      Object.keys(packs).map(Number).sort(function (a, b) { return a - b; }).forEach(function (n) {
-        list.push({
-          id: tier + "-" + n,
-          name: n + (n === 1 ? " Class" : " Classes"),
-          credits: n,
-          price: packs[n],
-          tier: tier,
-          tierLabel: TIER_LABEL[tier],
-          tag: n === 10 ? "Popular" : n === 20 ? "Best value" : "",
-          note: n + " credit" + (n === 1 ? "" : "s") + " · " + TIER_LABEL[tier] + " rate" +
-            (n > 1 ? " · S$" + (Math.round(packs[n] / n * 100) / 100) + " per class" : ""),
-          suggested: mine.indexOf(tier) >= 0
-        });
+    var mine = familyTypes(familyId);
+    var heldTypes = balances(familyId, { includeNeeded: false }).map(function (w) { return w.type.id; });
+    return packages().map(function (p) {
+      var t = creditType(p.creditType) || { id: p.creditType, name: creditTypeName(p.creditType) };
+      var row = Object.assign({}, p, {
+        type: t,
+        tierLabel: t.short || t.name,
+        suggested: mine.indexOf(p.creditType) >= 0 || heldTypes.indexOf(p.creditType) >= 0
       });
+      if (p.trial || p.price === 0) {
+        row.eligible = trialEligible(familyId);
+        row.claimed = hasClaimedTrial(familyId);
+        row.suggested = true;
+      }
+      return row;
     });
-    return list;
   }
 
-  // Parent portal purchase into the family pool (PayNow is mocked).
-  // packageId: an id from packagesFor ("trial", "elite-10", …); legacy
-  // HC.packages ids (pack5 / pack10 / pack20) use the family's top level.
+  // Parent portal purchase into the family's wallet for that package's type.
   function purchase(familyId, packageId, opts) {
     opts = opts || {};
     load();
     var f = family(familyId);
     if (!f) return fail("Account not found.");
-    var legacy = { pack5: 5, pack10: 10, pack20: 20 };
-    if (legacy[packageId]) packageId = topTier(familyId) + "-" + legacy[packageId];
-    var p = packagesFor(familyId).find(function (x) { return x.id === packageId; });
-    if (!p) return fail("Package not found.");
-    if (p.price === 0 && !p.eligible) {
-      return fail(p.claimed ? "The free trial credit has already been claimed."
+    var p = packageById(packageId);
+    if (!p || p.active === false) return fail("That package isn't on sale.");
+    if ((p.trial || p.price === 0) && !trialEligible(familyId)) {
+      return fail(hasClaimedTrial(familyId) ? "The free trial credit has already been claimed."
         : "The free trial is for new families.", { code: "trial" });
     }
     var entry = {
-      id: nextId("T"), familyId: familyId, childId: null, delta: p.credits,
-      type: p.price === 0 ? "trial" : "purchase",
+      id: nextId("T"), familyId: familyId, childId: null, creditType: p.creditType,
+      delta: p.credits, type: p.price === 0 ? "trial" : "purchase",
       packageId: p.id, amount: p.price, unitPrice: p.credits ? p.price / p.credits : 0,
-      reason: p.price === 0 ? "Free trial credit" : p.name + " · " + p.tierLabel + " (PayNow)",
+      reason: p.price === 0 ? "Free trial credit" : p.name + " · " + creditTypeShort(p.creditType) + " (PayNow)",
       by: opts.by || ("parent:" + familyId), at: opts.at || nowStamp()
     };
     DB.ledger.push(entry);
-    done(opts, { type: "credits", familyId: familyId });
-    return { ok: true, entry: entry, balance: balance(familyId) };
+    done(opts, { type: "credits", familyId: familyId, creditType: p.creditType });
+    return { ok: true, entry: entry, balance: balance(familyId, p.creditType) };
   }
 
   /* ============================================================
@@ -1367,9 +1647,11 @@
     if (dup) return fail(ch.name + " is already booked into this class.", { code: "duplicate" });
     if (occ.spotsLeft <= 0 && !opts.allowFull) return fail("Sorry, this class is full.", { code: "full" });
     var charge = opts.charge !== false;
-    var bal = balance(ch.familyId);
+    var typeId = creditTypeFor(occ);
+    var bal = balance(ch.familyId, typeId);
     if (charge && bal < occ.cost && !opts.allowNegative) {
-      return fail("Not enough credits.", { code: "credits", balance: bal });
+      return fail("No " + creditTypeShort(typeId) + " credits left.",
+        { code: "credits", balance: bal, creditType: typeId });
     }
     var at = opts.at || nowStamp();
     var b = {
@@ -1382,6 +1664,7 @@
       programmeId: occ.programmeId,
       childId: childId,
       familyId: ch.familyId,
+      creditType: typeId,
       status: "booked",
       cost: charge ? occ.cost : 0,
       source: opts.source || "parent",
@@ -1392,7 +1675,7 @@
     DB.bookings.push(b);
     if (charge) {
       DB.ledger.push({
-        id: nextId("T"), familyId: ch.familyId, childId: childId, delta: -occ.cost, type: "booking",
+        id: nextId("T"), familyId: ch.familyId, childId: childId, creditType: typeId, delta: -occ.cost, type: "booking",
         bookingId: b.id, reason: occ.name + " · " + formatDate(occ.date) + " " + HC.formatTime(occ.time) + " · " + ch.name,
         by: b.by, at: at
       });
@@ -1402,7 +1685,7 @@
       audit(opts.by, "assign", "Added " + ch.name + " to " + occ.name + " · " + formatDate(occ.date) + " " +
         HC.formatTime(occ.time) + (charge ? "" : " (no credit charged)"), at);
       notify(ch.familyId, "assigned", ch.name + " was booked into " + occ.name + " on " + formatDate(occ.date) + " at " +
-        HC.formatTime(occ.time) + " by the studio" + (charge ? " — " + occ.cost + " credit used." : "."), b.id, at);
+        HC.formatTime(occ.time) + " by the studio" + (charge ? " — " + occ.cost + " " + creditTypeShort(typeId) + " credit used." : "."), b.id, at);
     }
     done(opts, { type: "book", key: key });
     return { ok: true, booking: b };
@@ -1422,7 +1705,9 @@
       var occ = opts.occ || occurrence(b.occKey);
       var ch = child(b.childId);
       DB.ledger.push({
-        id: nextId("T"), familyId: b.familyId, childId: b.childId, delta: b.cost, type: "refund", bookingId: b.id,
+        id: nextId("T"), familyId: b.familyId, childId: b.childId,
+        creditType: b.creditType || creditTypeFor(occ || { programmeId: b.programmeId }),
+        delta: b.cost, type: "refund", bookingId: b.id,
         reason: "Refund · " + (occ ? occ.name + " · " + formatDate(occ.date) : "cancelled class") + (ch ? " · " + ch.name : ""),
         by: opts.by, at: at
       });
@@ -1618,40 +1903,68 @@
   function creditReport(opts) {
     opts = opts || {};
     var c = idx();
-    var t = todayISO();
+    var today = todayISO();
+    var to = opts.to && opts.to <= today ? opts.to : today;       // balances "as at"
+    var from = opts.from && opts.from <= to ? opts.from : to.slice(0, 8) + "01";
+    var t = to;
     var dormantDays = opts.dormantDays || 21;
-    var monthStart = t.slice(0, 8) + "01";
+    var inRange = function (stamp) { var d = String(stamp).slice(0, 10); return d >= from && d <= to; };
+    var upTo = function (stamp) { return String(stamp).slice(0, 10) <= to; };
+
+    var typeTotals = {};
+    function addType(id, n) { typeTotals[id] = (typeTotals[id] || 0) + n; }
 
     var rows = DB.families.map(function (f) {
-      var available = c.balance[f.id] || 0;
-      var kids = DB.children.filter(function (ch) { return ch.familyId === f.id && ch.active !== false; });
-      var reserved = 0, lastClass = null, upcoming = 0;
-      (c.byFamily[f.id] || []).forEach(function (b) {
-        if (b.status !== "booked") return;
-        if (!hasStarted(b)) { reserved += b.cost; upcoming++; }
-        else if (!lastClass || b.date > lastClass) lastClass = b.date;
-      });
+      var byType = {}, available = 0;
+      var bought = 0, spent = 0, refunded = 0, addedByStaff = 0, takenByStaff = 0, revenue = 0;
       var paidCredits = 0, paidAmount = 0, lastPurchase = null, lastLedger = null, hadTrial = false;
       DB.ledger.forEach(function (l) {
         if (l.familyId !== f.id) return;
-        if (!lastLedger || l.at > lastLedger) lastLedger = l.at;
-        if (l.type === "trial") hadTrial = true;
-        if (l.type === "purchase" || (l.type === "manual" && l.delta > 0 && l.amount > 0)) {
-          paidCredits += l.delta; paidAmount += l.amount || 0;
-          if (!lastPurchase || l.at > lastPurchase) lastPurchase = l.at;
+        var type = l.creditType || "junior";
+        if (upTo(l.at)) {
+          byType[type] = (byType[type] || 0) + l.delta;
+          available += l.delta;
+          if (!lastLedger || l.at > lastLedger) lastLedger = l.at;
+          if (l.type === "trial") hadTrial = true;
+          if (l.type === "purchase" || (l.type === "manual" && l.delta > 0 && l.amount > 0)) {
+            paidCredits += l.delta; paidAmount += l.amount || 0;
+            if (!lastPurchase || l.at > lastPurchase) lastPurchase = l.at;
+          }
+        }
+        if (inRange(l.at)) {
+          if (l.type === "purchase" || l.type === "trial") { bought += l.delta; revenue += l.amount || 0; }
+          else if (l.type === "booking") spent += -l.delta;
+          else if (l.type === "refund") refunded += l.delta;
+          else if (l.type === "manual") {
+            if (l.delta > 0) { addedByStaff += l.delta; revenue += l.amount || 0; }
+            else takenByStaff += -l.delta;
+          }
         }
       });
+      Object.keys(byType).forEach(function (id) { if (byType[id] > 0) addType(id, byType[id]); });
+
+      var reserved = 0, lastClass = null, upcoming = 0, attended = 0;
+      (c.byFamily[f.id] || []).forEach(function (b) {
+        if (b.status === "booked" && inRange(b.date) && hasStarted(b)) attended++;
+        if (b.status !== "booked") return;
+        if (b.date > to || (!hasStarted(b) && b.date >= to)) { reserved += b.cost; upcoming++; }
+        else if (!lastClass || b.date > lastClass) lastClass = b.date;
+      });
+
       var unitPrice = paidCredits ? paidAmount / paidCredits : DEFAULT_UNIT_PRICE;
-      // a negative balance means some upcoming bookings haven't been paid for yet
       var unpaid = available < 0 ? Math.min(reserved, -available) : 0;
       var unutilised = Math.max(0, available) + reserved - unpaid;
       var since = f.createdAt.slice(0, 10);
       var lastActivity = [lastClass, lastLedger && lastLedger.slice(0, 10)].filter(Boolean).sort().pop() || since;
-      var idleDays = daysBetween(lastClass || since, t);
+      var idleDays = daysBetween(lastClass || since, today);
       return {
         family: f,
-        children: kids,
+        children: DB.children.filter(function (ch) { return ch.familyId === f.id && ch.active !== false; }),
         available: available,
+        byType: byType,
+        wallets: Object.keys(byType).filter(function (id) { return byType[id]; }).map(function (id) {
+          return { type: creditType(id) || { id: id, name: creditTypeName(id), short: creditTypeShort(id) }, credits: byType[id] };
+        }),
         reserved: reserved - unpaid,
         reservedTotal: reserved,
         unpaid: unpaid,
@@ -1659,6 +1972,10 @@
         unutilised: unutilised,
         unitPrice: unitPrice,
         estValue: Math.round(unutilised * unitPrice * 100) / 100,
+        // activity inside the chosen date range
+        bought: bought, spent: spent, refunded: refunded,
+        addedByStaff: addedByStaff, takenByStaff: takenByStaff,
+        revenue: revenue, attended: attended,
         lastPurchase: lastPurchase,
         lastClass: lastClass,
         lastActivity: lastActivity,
@@ -1684,23 +2001,42 @@
          families: rows.length, familiesWithCredits: 0, dormantFamilies: 0, dormantCredits: 0,
          negativeFamilies: 0, students: 0 });
     totals.estValue = Math.round(totals.estValue);
+    totals.byType = creditTypes().map(function (ty) {
+      return { type: ty, credits: typeTotals[ty.id] || 0 };
+    }).filter(function (x) { return x.credits; })
+      .sort(function (a, b) { return b.credits - a.credits; });
 
-    // credit movement this calendar month
-    var movement = { from: monthStart, to: t, purchased: 0, trial: 0, used: 0, refunded: 0, manualAdded: 0, manualDeducted: 0, revenue: 0 };
+    // credit movement inside the chosen range
+    var movement = { from: from, to: to, purchased: 0, trial: 0, used: 0, refunded: 0,
+      manualAdded: 0, manualDeducted: 0, revenue: 0, byType: {} };
     DB.ledger.forEach(function (l) {
-      var d = l.at.slice(0, 10);
-      if (d < monthStart || d > t) return;
-      if (l.type === "purchase") { movement.purchased += l.delta; movement.revenue += l.amount || 0; }
+      if (!inRange(l.at)) return;
+      var type = l.creditType || "junior";
+      var m = movement.byType[type] = movement.byType[type] || { in: 0, out: 0, revenue: 0 };
+      if (l.delta > 0) m.in += l.delta; else m.out += -l.delta;
+      if (l.type === "purchase") { movement.purchased += l.delta; movement.revenue += l.amount || 0; m.revenue += l.amount || 0; }
       else if (l.type === "trial") movement.trial += l.delta;
       else if (l.type === "booking") movement.used += -l.delta;
       else if (l.type === "refund") movement.refunded += l.delta;
       else if (l.type === "manual") {
-        if (l.delta > 0) { movement.manualAdded += l.delta; movement.revenue += l.amount || 0; }
+        if (l.delta > 0) { movement.manualAdded += l.delta; movement.revenue += l.amount || 0; m.revenue += l.amount || 0; }
         else movement.manualDeducted += -l.delta;
       }
     });
+    movement.net = movement.purchased + movement.trial + movement.refunded + movement.manualAdded -
+      movement.used - movement.manualDeducted;
 
-    // available credits by days since any of the family's children last attended a class
+    // classes and attendance inside the range
+    var activity = { classes: 0, booked: 0, present: 0, late: 0, absent: 0, unmarked: 0 };
+    occurrencesForRange(from, to).forEach(function (o) { activity.classes++; });
+    DB.bookings.forEach(function (b) {
+      if (b.status !== "booked" || b.date < from || b.date > to) return;
+      activity.booked++;
+      if (b.attendance) activity[b.attendance]++;
+      else if (hasStarted(b)) activity.unmarked++;
+    });
+
+    // available credits by days since the family's last class
     var aging = [
       { label: "0–14 days", min: 0, max: 14, credits: 0, families: 0 },
       { label: "15–30 days", min: 15, max: 30, credits: 0, families: 0 },
@@ -1714,7 +2050,7 @@
       bucket.families++;
     });
 
-    return { asOf: t, rows: rows, totals: totals, movement: movement, aging: aging };
+    return { asOf: t, from: from, to: to, rows: rows, totals: totals, movement: movement, activity: activity, aging: aging };
   }
 
   /* ============================================================
@@ -1904,6 +2240,7 @@
       }),
       templateCoach: {},
       coachAliases: {},
+      creditTypes: [], packages: [],
       overrides: {}, seriesEnds: {}, oneOffs: [], leaves: [],
       notes: [], notices: [], audit: []
     };
@@ -1912,6 +2249,45 @@
     var today = todayISO();
     var ws0 = weekStart(today);
     var meta = {}; // childId → seeding hints
+
+    // ---- credit types & the packages on sale ----
+    DB.creditTypes = [
+      { id: "junior", name: "Junior classes", short: "Junior", kind: "class", order: 1, active: true,
+        programmes: ["tots", "wushu-jr", "flips-jr", "cond-jr"] },
+      { id: "elite", name: "Elite classes", short: "Elite", kind: "class", order: 2, active: true,
+        programmes: ["wushu-elite", "flips-elite", "cond-elite"] },
+      { id: "competitive", name: "Competitive Private Group", short: "Competitive", kind: "class", order: 3, active: true,
+        programmes: ["competitive"] }
+    ];
+    syncPrivateTypes(); // one "Private (Coach X)" type per coach
+    var PRIVATE_RATE = { "Coach A": 200, "Coach B": 160 };   // the studio's 1-to-1 rates
+    Object.keys(TIER_PACKS).forEach(function (tier) {
+      Object.keys(TIER_PACKS[tier]).map(Number).sort(function (a, b) { return a - b; }).forEach(function (n) {
+        DB.packages.push({
+          id: nextId("P"), name: n + (n === 1 ? " Class" : " Classes"), creditType: tier,
+          credits: n, price: TIER_PACKS[tier][n],
+          tag: n === 10 ? "Popular" : n === 20 ? "Best value" : "",
+          note: "", trial: false, active: true, order: DB.packages.length + 1, createdAt: nowStamp()
+        });
+      });
+    });
+    DB.creditTypes.filter(function (t) { return t.kind === "private"; }).forEach(function (t) {
+      var rate = PRIVATE_RATE[t.coach] || 180;
+      [1, 5].forEach(function (n) {
+        DB.packages.push({
+          id: nextId("P"), name: n === 1 ? "Single session" : n + " Sessions", creditType: t.id,
+          credits: n, price: n === 1 ? rate : Math.round(rate * n * 0.95),
+          tag: n === 5 ? "Save 5%" : "", note: "", trial: false, active: true,
+          order: DB.packages.length + 1, createdAt: nowStamp()
+        });
+      });
+    });
+    DB.packages.push({
+      id: nextId("P"), name: "Free Trial", creditType: "junior", credits: 1, price: 0,
+      tag: "New families", note: "One complimentary class for a new family",
+      trial: true, active: true, order: 0, createdAt: nowStamp()
+    });
+    rev++;
 
     // ---- families & children ----
     SEED_FAMILIES.concat(expandMoreFamilies()).forEach(function (row, fi) {
@@ -1981,66 +2357,89 @@
     });
     DB.children.forEach(function (c) { delete c._r; });
 
-    // ---- ledger: the family buys packs before they're needed, then each booking ----
+    // ---- ledger: the family buys packs of the right credit type, then each booking ----
+    var packFor = function (typeId, size) {
+      return DB.packages.find(function (p) {
+        return p.creditType === typeId && p.credits === size && !p.trial;
+      }) || null;
+    };
+    var sizesFor = function (typeId) {
+      return DB.packages.filter(function (p) { return p.creditType === typeId && !p.trial; })
+        .map(function (p) { return p.credits; }).sort(function (a, b) { return b - a; });
+    };
+
     DB.families.forEach(function (f) {
       var kids = DB.children.filter(function (c) { return c.familyId === f.id; });
-      var tier = tierOf(kids.reduce(function (top, c) {
-        return LEVELS.indexOf(c.level) > LEVELS.indexOf(top) ? c.level : top;
-      }, "Junior"));
       var fb = DB.bookings.filter(function (b) { return b.familyId === f.id; })
         .sort(function (a, b) { return a.at.localeCompare(b.at); });
       var remainder = f._remainder;
       delete f._remainder;
-      var bal = 0;
-
-      function buy(at, size) {
-        var price = TIER_PACKS[tier][size];
-        DB.ledger.push({
-          id: nextId("T"), familyId: f.id, childId: null, delta: size, type: "purchase",
-          packageId: tier + "-" + size, amount: price, unitPrice: price / size,
-          reason: size + " Classes · " + TIER_LABEL[tier] + " (PayNow)",
-          by: "parent:" + f.id, at: at
-        });
-        bal += size;
-      }
-      function pickSize(left) {
-        return PACK_SIZES.find(function (s) { return s <= Math.max(5, left); }) || 5;
-      }
 
       if (kids.every(function (c) { return meta[c.id].trialOnly; })) {
-        DB.ledger.push({ id: nextId("T"), familyId: f.id, childId: null, delta: 1, type: "trial", amount: 0,
-          reason: "Free trial credit", by: "system", at: f.createdAt });
+        DB.ledger.push({ id: nextId("T"), familyId: f.id, childId: null, creditType: "junior",
+          delta: 1, type: "trial", amount: 0, reason: "Free trial credit", by: "system", at: f.createdAt });
         return;
       }
-      if (f.email === "terence.low@example.com") {
-        // dormant: topped up big, then stopped coming
-        buy(addDays(ws0, -40) + "T20:14", 20);
-      }
-      var left = fb.length + remainder;
-      fb.forEach(function (b, i) {
-        if (bal < 1) {
-          var size = pickSize(left);
-          var at = i === 0
-            ? addDays(b.at.slice(0, 10), -2) + "T" + pad(9 + (i % 10)) + ":1" + (i % 10)
-            : addDays(b.at.slice(0, 10), -1) + "T" + pad(9 + (i % 10)) + ":2" + (i % 10);
-          buy(at, size);
-          left -= size;
-        }
-        bal -= 1;
-        var occName = (HC.getProgramme(b.programmeId) || {}).name;
-        var ch = DB.children.find(function (c) { return c.id === b.childId; });
-        b.by = b.source === "staff" ? staffIdForTemplate(b.templateId) : "parent:" + f.id;
-        DB.ledger.push({
-          id: nextId("T"), familyId: f.id, childId: b.childId, delta: -1, type: "booking", bookingId: b.id,
-          reason: occName + " · " + formatDate(b.date) + " " + HC.formatTime(b.time) + " · " + ch.name,
-          by: b.by, at: b.at
-        });
+
+      // bookings split by the credits they need
+      var byType = {};
+      fb.forEach(function (b) {
+        var typeId = creditTypeFor({ programmeId: b.programmeId, coach: null });
+        (byType[typeId] = byType[typeId] || []).push(b);
       });
-      if (bal < remainder) {
-        var gap = remainder - bal;
-        var size = PACK_SIZES.slice().reverse().find(function (s) { return s >= gap; }) || 20;
-        buy(hoursAgo(24 * (3 + (f.id.length + fb.length) % 9)), size);
-      }
+      var mainType = Object.keys(byType).sort(function (x, y) { return byType[y].length - byType[x].length; })[0] || "junior";
+
+      Object.keys(byType).forEach(function (typeId) {
+        var list = byType[typeId];
+        var sizes = sizesFor(typeId);
+        var keep = typeId === mainType ? remainder : 0;   // leftover credits sit in the main wallet
+        var bal = 0;
+
+        function buy(at, size) {
+          var pk = packFor(typeId, size) || packFor(typeId, sizes[sizes.length - 1]);
+          if (!pk) return;
+          DB.ledger.push({
+            id: nextId("T"), familyId: f.id, childId: null, creditType: typeId, delta: pk.credits,
+            type: "purchase", packageId: pk.id, amount: pk.price, unitPrice: pk.price / pk.credits,
+            reason: pk.name + " · " + creditTypeShort(typeId) + " (PayNow)",
+            by: "parent:" + f.id, at: at
+          });
+          bal += pk.credits;
+        }
+        function pickSize(left) {
+          return sizes.find(function (n) { return n <= Math.max(sizes[sizes.length - 1], left); }) || sizes[sizes.length - 1];
+        }
+
+        if (f.email === "terence.low@example.com" && typeId === mainType) {
+          buy(addDays(ws0, -40) + "T20:14", 20);   // dormant: topped up big, then stopped coming
+        }
+        var left = list.length + keep;
+        list.forEach(function (b, i) {
+          if (bal < 1) {
+            var at = i === 0
+              ? addDays(b.at.slice(0, 10), -2) + "T" + pad(9 + (i % 10)) + ":1" + (i % 10)
+              : addDays(b.at.slice(0, 10), -1) + "T" + pad(9 + (i % 10)) + ":2" + (i % 10);
+            buy(at, pickSize(left));
+            left -= bal || 1;
+          }
+          bal -= 1;
+          var occName = (programmeById(b.programmeId) || {}).name;
+          var ch = DB.children.find(function (c) { return c.id === b.childId; });
+          b.creditType = typeId;
+          b.by = b.source === "staff" ? staffIdForTemplate(b.templateId) : "parent:" + f.id;
+          DB.ledger.push({
+            id: nextId("T"), familyId: f.id, childId: b.childId, creditType: typeId, delta: -1,
+            type: "booking", bookingId: b.id,
+            reason: occName + " · " + formatDate(b.date) + " " + HC.formatTime(b.time) + " · " + ch.name,
+            by: b.by, at: b.at
+          });
+        });
+        if (bal < keep) {
+          var gap = keep - bal;
+          var size = sizes.slice().reverse().find(function (n) { return n >= gap; }) || sizes[0];
+          buy(hoursAgo(24 * (3 + (f.id.length + list.length) % 9)), size);
+        }
+      });
     });
 
     // Coach A covers Coach B's Friday elite class this week — set before the
@@ -2061,8 +2460,8 @@
     var lastYesterday = HC.schedule.filter(function (t) { return t.day === dayIndex(yesterday); })
       .map(function (t) { return t.time; }).sort().pop();
     DB.bookings.forEach(function (b) {
-      var prog = HC.getProgramme(b.programmeId) || {};
-      var ended =b.date < today || (b.date === today && nowM >= toMinutes(b.time) + (prog.duration || 60));
+      var prog = programmeById(b.programmeId) || {};
+      var ended = b.date < today || (b.date === today && nowM >= toMinutes(b.time) + (prog.duration || 60));
       if (!ended || b.date === today || (b.date === yesterday && b.time === lastYesterday)) return;
       var r = rnd();
       // the demo family (first seed row) keeps a near-perfect record for walkthroughs
@@ -2113,19 +2512,19 @@
       return DB.children.find(function (c) { return c.name === childName; }).familyId;
     };
     adjustCredits(famOf("Ryan Lim"), -1, {
-      reason: "Late cancellation / no-show", note: "Ryan missed Flips & Jumps without notice.",
+      creditType: "junior", reason: "Late cancellation / no-show", note: "Ryan missed Flips & Jumps without notice.",
       by: "admin", at: hoursAgo(9), silent: true
     });
     adjustCredits(famOf("Dev Kumar"), 5, {
-      reason: "Payment received at studio", note: "Cash at front desk — receipt #0418.", amount: 220,
+      creditType: "junior", reason: "Payment received at studio", note: "Cash at front desk — receipt #0418.", amount: 220,
       by: "admin", at: addDays(today, -6) + "T18:40", silent: true
     });
     adjustCredits(famOf("Jayden Teo"), -2, {
-      reason: "Private 1-to-1 lesson", note: "Extra competition prep session.",
+      creditType: "competitive", reason: "Camp or special programme", note: "Two sessions moved to the December camp.",
       by: "admin", at: hoursAgo(3), silent: true
     });
     adjustCredits(famOf("Hannah Chua"), 1, {
-      reason: "Make-up / goodwill credit", note: "Class ran short due to aircon fault.",
+      creditType: "junior", reason: "Make-up / goodwill credit", note: "Class ran short due to aircon fault.",
       by: "admin", at: addDays(today, -2) + "T10:30", silent: true
     });
 
@@ -2134,16 +2533,23 @@
     // Coach A blocks next Thursday's first class; make sure the demo family is affected
     var blockKey = occKey(addDays(nw, 3), "h1");
     if (!DB.bookings.some(function (b) { return b.occKey === blockKey && b.childId === ethan.id; })) {
-      DB.ledger.push({ id: nextId("T"), familyId: demo.id, childId: null, delta: 5, type: "purchase", packageId: "junior-5",
-        amount: 220, unitPrice: 44, reason: "5 Classes · Junior (PayNow)", by: "parent:" + demo.id, at: hoursAgo(50) });
+      var jrPack = DB.packages.find(function (x) { return x.creditType === "junior" && x.credits === 5 && !x.trial; });
+      DB.ledger.push({ id: nextId("T"), familyId: demo.id, childId: null, creditType: "junior",
+        delta: jrPack.credits, type: "purchase", packageId: jrPack.id, amount: jrPack.price,
+        unitPrice: jrPack.price / jrPack.credits, reason: jrPack.name + " · Junior (PayNow)",
+        by: "parent:" + demo.id, at: hoursAgo(50) });
       rev++;
       book(blockKey, ethan.id, { by: "parent:" + demo.id, at: hoursAgo(49), silent: true });
     }
     blockOccurrence(blockKey, { by: "coach-a", reason: "Coaching at national team selection", at: hoursAgo(20), silent: true });
 
-    // Coach B on leave next Wednesday
+    // Coach B away all day next Wednesday
     addLeave({ coach: "Coach B", date: addDays(nw, 2), reason: "Competition judging duty" },
       { by: "coach-b", at: hoursAgo(CHANGES_FROM), silent: true, allowPast: true });
+
+    // Coach A away for part of next Tuesday — only the classes in that window close
+    addLeave({ coach: "Coach A", date: addDays(nw, 1), from: "16:00", to: "18:00", reason: "Medical appointment" },
+      { by: "coach-a", at: hoursAgo(CHANGES_FROM - 2), silent: true, allowPast: true });
 
     // Next Sunday's junior conditioning is deleted for that date only
     removeOccurrence(occKey(addDays(nw, 6), "u3"), { by: "admin", reason: "Hall booked for grading", at: hoursAgo(12), silent: true });
@@ -2159,6 +2565,32 @@
     addOneOff({ date: addDays(ws0, 6), time: "17:00", programmeId: "flips-jr", coach: "Coach A",
       capacity: 12, duration: 60, note: "Holiday skills clinic" },
       { by: "coach-a", at: hoursAgo(60), silent: true, allowPast: true });
+
+    // ---- private 1-to-1: a family buys sessions and books one ----
+    [["Arjun Menon", "Coach A", 1], ["Sophie Lim", "Coach B", 2]].forEach(function (row, i) {
+      var kid = DB.children.find(function (c) { return c.name === row[0]; });
+      if (!kid) return;
+      var typeId = privateTypeId(row[1]);
+      var pk = DB.packages.find(function (x) { return x.creditType === typeId && x.credits === 1; });
+      if (!pk) return;
+      for (var n = 0; n < row[2]; n++) {
+        DB.ledger.push({
+          id: nextId("T"), familyId: kid.familyId, childId: null, creditType: typeId, delta: pk.credits,
+          type: "purchase", packageId: pk.id, amount: pk.price, unitPrice: pk.price,
+          reason: pk.name + " · " + creditTypeShort(typeId) + " (PayNow)",
+          by: "parent:" + kid.familyId, at: hoursAgo(80 + i * 6 + n)
+        });
+      }
+      rev++;
+      // the studio schedules the session, then the parent books it
+      var res = addOneOff({
+        date: addDays(nw, 3 + i), time: i ? "13:00" : "12:00", programmeId: PRIVATE_PROGRAMME.id,
+        coach: row[1], capacity: 1, duration: 60, note: "Private 1-to-1 with " + row[1]
+      }, { by: "admin", at: hoursAgo(70 - i * 4), silent: true, allowPast: true });
+      if (res.ok) {
+        book(res.key, kid.id, { by: "parent:" + kid.familyId, at: hoursAgo(69 - i * 4), silent: true });
+      }
+    });
 
     // seeded audit trail entries for context
     audit("coach-a", "attendance", "Marked attendance · Wushu Junior " + formatDate(addDays(today, -2)), hoursAgo(40));
@@ -2208,7 +2640,8 @@
     addOneOffs: addOneOffs, datesFromRanges: datesFromRanges, oneOffGroup: oneOffGroup,
 
     // leave
-    leaves: leaves, leaveFor: leaveFor, leaveImpact: leaveImpact, addLeave: addLeave, removeLeave: removeLeave,
+    leaves: leaves, leaveFor: leaveFor, leavesOn: leavesOn, leaveLabel: leaveLabel,
+    leaveImpact: leaveImpact, leaveTargets: leaveTargets, addLeave: addLeave, removeLeave: removeLeave,
 
     // people
     families: families, family: family, familyByEmail: familyByEmail,
@@ -2217,8 +2650,13 @@
     removeChild: removeChild, searchChildren: searchChildren,
 
     // credits
-    balance: balance, ledger: ledger, ledgerWithBalance: ledgerWithBalance,
-    packagesFor: packagesFor, familyTiers: familyTiers,
+    balance: balance, balances: balances, ledger: ledger, ledgerWithBalance: ledgerWithBalance,
+    packagesFor: packagesFor, familyTypes: familyTypes,
+    creditTypes: creditTypes, creditType: creditType, creditTypeFor: creditTypeFor,
+    creditTypeName: creditTypeName, creditTypeShort: creditTypeShort,
+    packages: packages, packageById: packageById, addPackage: addPackage,
+    updatePackage: updatePackage, retirePackage: retirePackage,
+    programmes: allProgrammes, programme: programmeById, privateProgramme: PRIVATE_PROGRAMME,
     adjustCredits: adjustCredits, purchase: purchase, hasClaimedTrial: hasClaimedTrial,
     trialEligible: trialEligible,
 
